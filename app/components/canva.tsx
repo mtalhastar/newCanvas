@@ -126,14 +126,8 @@ const Canva = () => {
     scale: INITIAL_SCALE,
   });
   const [stageDimensions, setStageDimensions] = useState(INITIAL_DIMENSIONS);
-  const [images, setImages] = useState(
-    imageUrls.map((url, index) => ({
-      id: `image-${index}`,
-      url,
-      x: 0,
-      y: index * 220,
-    }))
-  );
+  const [images, setImages] = useState<CanvasImage[]>([]);
+  const [objectUrls, setObjectUrls] = useState<string[]>([]);
   // Add to existing state
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -192,6 +186,8 @@ const Canva = () => {
 
   const handleDrop = useCallback((e: DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+
     const stage = stageRef.current;
     if (!stage) return;
 
@@ -203,22 +199,20 @@ const Canva = () => {
       y: (pos.y - stage.y()) / stage.scaleY(),
     };
 
-    Array.from(e.dataTransfer?.files || []).forEach((file) => {
-      if (file.type.match("image.*")) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const imageUrl = event.target?.result as string;
-          setImages((prev) => [
-            ...prev,
-            {
-              id: `image-${Date.now()}`,
-              url: imageUrl,
-              x: stagePos.x,
-              y: stagePos.y,
-            },
-          ]);
-        };
-        reader.readAsDataURL(file);
+    const files = Array.from(e.dataTransfer?.files || []);
+    files.forEach((file) => {
+      if (file.type.startsWith("image/")) {
+        const objectUrl = URL.createObjectURL(file);
+        setObjectUrls((prev) => [...prev, objectUrl]);
+        setImages((prev) => [
+          ...prev,
+          {
+            id: `image-${Date.now()}`,
+            url: objectUrl,
+            x: stagePos.x,
+            y: stagePos.y,
+          },
+        ]);
       }
     });
   }, []);
@@ -434,6 +428,116 @@ const Canva = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [selectedIds]);
 
+  const handleFileDrop = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const pos = stage.getPointerPosition();
+    if (!pos) return;
+
+    const stagePos = {
+      x: (pos.x - stage.x()) / stage.scaleX(),
+      y: (pos.y - stage.y()) / stage.scaleY(),
+    };
+
+    const files = Array.from(e.dataTransfer?.files || []);
+    files.forEach((file) => {
+      // Handle both SVG and other image types
+      if (file.type === "image/svg+xml" || file.type.startsWith("image/")) {
+        const objectUrl = URL.createObjectURL(file);
+
+        // For SVGs, we need to load them first to get dimensions
+        if (file.type === "image/svg+xml") {
+          const img = document.createElement("img");
+          img.width = 200;
+          img.height = 200;
+          img.onload = () => {
+            setObjectUrls((prev) => [...prev, objectUrl]);
+            setImages((prev) => [
+              ...prev,
+              {
+                id: `image-${Date.now()}`,
+                url: objectUrl,
+                x: stagePos.x,
+                y: stagePos.y,
+              },
+            ]);
+          };
+          img.src = objectUrl;
+        } else {
+          setObjectUrls((prev) => [...prev, objectUrl]);
+          setImages((prev) => [
+            ...prev,
+            {
+              id: `image-${Date.now()}`,
+              url: objectUrl,
+              x: stagePos.x,
+              y: stagePos.y,
+            },
+          ]);
+        }
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const container = stageRef.current?.container();
+    if (!container) return;
+
+    const handleFileDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      const pos = stage.getPointerPosition();
+      if (!pos) return;
+
+      const stagePos = {
+        x: (pos.x - stage.x()) / stage.scaleX(),
+        y: (pos.y - stage.y()) / stage.scaleY(),
+      };
+
+      const files = Array.from(e.dataTransfer?.files || []);
+      files.forEach((file) => {
+        if (file.type.startsWith("image/")) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const imageUrl = event.target?.result as string;
+            setImages((prev) => [
+              ...prev,
+              {
+                id: `image-${Date.now()}`,
+                url: imageUrl,
+                x: stagePos.x,
+                y: stagePos.y,
+              },
+            ]);
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+    };
+
+    container.addEventListener("dragover", (e) => e.preventDefault());
+    container.addEventListener("drop", handleFileDrop);
+
+    return () => {
+      container.removeEventListener("dragover", (e) => e.preventDefault());
+      container.removeEventListener("drop", handleFileDrop);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [objectUrls]);
+
   if (!mounted) {
     return null; // or loading state
   }
@@ -459,8 +563,10 @@ const Canva = () => {
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onDragOver={(e: KonvaEventObject<DragEvent>) => e.evt.preventDefault()}
-      onDrop={(e: KonvaEventObject<DragEvent>) => handleDrop(e.evt)}
+      onDragOver={(e: KonvaEventObject<DragEvent>) => {
+        e.evt.preventDefault();
+        e.evt.stopPropagation();
+      }}
     >
       <Layer ref={gridLayerRef} listening={false}>
         <Group>{renderGrid()}</Group>
