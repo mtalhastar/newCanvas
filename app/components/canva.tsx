@@ -372,8 +372,8 @@ const Canva = () => {
     container.addEventListener("drop", handleDrop);
 
     return () => {
-      container?.removeEventListener("dragover", handleDragOver);
-      container?.removeEventListener("drop", handleDrop);
+      container.removeEventListener("dragover", handleDragOver);
+      container.removeEventListener("drop", handleDrop);
     };
   }, [handleDrop]);
 
@@ -547,12 +547,11 @@ const Canva = () => {
       ref={stageRef}
       width={stageDimensions.width}
       height={stageDimensions.height}
-      onWheel={handleWheel}
       draggable={!isSelecting}
-      onDragMove={handleDragMove}
-      scale={{ x: viewport.scale, y: viewport.scale }}
+      onWheel={handleWheel}
       x={viewport.x}
       y={viewport.y}
+      scale={{ x: viewport.scale, y: viewport.scale }}
       onClick={(e) => {
         // Deselect when clicking on stage
         const clickedOnEmpty = e.target === e.target.getStage();
@@ -563,10 +562,6 @@ const Canva = () => {
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onDragOver={(e: KonvaEventObject<DragEvent>) => {
-        e.evt.preventDefault();
-        e.evt.stopPropagation();
-      }}
     >
       <Layer ref={gridLayerRef} listening={false}>
         <Group>{renderGrid()}</Group>
