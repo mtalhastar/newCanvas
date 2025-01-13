@@ -3,7 +3,6 @@ import { Stage, Layer, Circle, Image, Group, Rect } from "react-konva";
 import type Konva from "konva";
 import { useState, useEffect, useRef, useCallback } from "react";
 import useImage from "use-image";
-import { debounce, throttle } from "lodash";
 import { KonvaEventObject } from "konva/lib/Node";
 
 const GRID_SIZE = 50;
@@ -12,12 +11,20 @@ const INITIAL_DIMENSIONS = {
   width: 1000, // default width
   height: 800, // default height
 };
+
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 5;
+const ZOOM_FACTOR = 1.06;
 
 // Add these constants
 const BASE_GRID_SIZE = 50;
 const MIN_VISIBLE_GRID_SIZE = 20;
+
+// Update constants at top
+const IMAGE_GAP = 1000; // Increased gap between images
+const GRID_COLUMNS = 3;
+const IMAGE_WIDTH = 200;
+const IMAGE_HEIGHT = 200;
 
 interface ViewportState {
   x: number;
@@ -48,25 +55,27 @@ const DraggableImage = ({
   y,
   isSelected,
   onClick,
-  onDelete,
-}: {
-  url: string;
-  x: number;
-  y: number;
-  isSelected: boolean;
-  onClick: (e: KonvaEventObject<MouseEvent>) => void;
-  onDelete: () => void;
-}) => {
+}: DraggableImageProps) => {
   const [image] = useImage(url);
   const [position, setPosition] = useState({ x, y });
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    if (image) {
+      setDimensions({
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+      });
+    }
+  }, [image]);
 
   return (
     <Image
       image={image}
       x={position.x}
       y={position.y}
-      width={200}
-      height={200}
+      width={dimensions.width}
+      height={dimensions.height}
       draggable
       onClick={onClick}
       stroke={isSelected ? "#0096FF" : undefined}
@@ -156,10 +165,15 @@ const Canva = () => {
       const pointer = stage.getPointerPosition();
       if (!pointer) return;
 
-      const newScale = limitScale(calculateScale(viewport.scale, e.evt.deltaY));
+      const oldScale = viewport.scale;
+      const newScale =
+        e.evt.deltaY > 0
+          ? Math.max(oldScale / ZOOM_FACTOR, MIN_SCALE)
+          : Math.min(oldScale * ZOOM_FACTOR, MAX_SCALE);
+
       const mousePointTo = {
-        x: (pointer.x - viewport.x) / viewport.scale,
-        y: (pointer.y - viewport.y) / viewport.scale,
+        x: (pointer.x - viewport.x) / oldScale,
+        y: (pointer.y - viewport.y) / oldScale,
       };
 
       updateViewport({
@@ -199,6 +213,7 @@ const Canva = () => {
       y: (pos.y - stage.y()) / stage.scaleY(),
     };
 
+    // Process dropped files
     const files = Array.from(e.dataTransfer?.files || []);
     files.forEach((file) => {
       if (file.type.startsWith("image/")) {
@@ -225,71 +240,73 @@ const Canva = () => {
     }
   }, [selectedId]);
 
-  const handleMouseDown = (e: KonvaEventObject<MouseEvent>) => {
+  const handleMouseDown = useCallback((e: KonvaEventObject<MouseEvent>) => {
     const stage = e.target.getStage();
     if (!stage) return;
-
+  
     const clickedOnEmpty = e.target === stage;
     if (clickedOnEmpty) {
       setSelectedIds([]);
       setIsSelecting(true);
       const pos = stage.getPointerPosition();
       if (!pos) return;
-
+      
       selectionStart.current = {
         x: (pos.x - stage.x()) / stage.scaleX(),
-        y: (pos.y - stage.y()) / stage.scaleY(),
+        y: (pos.y - stage.y()) / stage.scaleY()
       };
       setSelectionRect({
         x: pos.x,
         y: pos.y,
         width: 0,
-        height: 0,
+        height: 0
       });
     }
-  };
-
-  const handleMouseMove = (e: KonvaEventObject<MouseEvent>) => {
+  }, []);
+  
+  const handleMouseMove = useCallback((e: KonvaEventObject<MouseEvent>) => {
     if (!isSelecting || !selectionStart.current) return;
-
+  
     const stage = e.target.getStage();
     if (!stage) return;
-
+  
     const pos = stage.getPointerPosition();
     if (!pos) return;
-
+  
     setSelectionRect({
       x: Math.min(pos.x, selectionStart.current.x),
       y: Math.min(pos.y, selectionStart.current.y),
       width: Math.abs(pos.x - selectionStart.current.x),
-      height: Math.abs(pos.y - selectionStart.current.y),
+      height: Math.abs(pos.y - selectionStart.current.y)
     });
-  };
-
-  const handleMouseUp = () => {
-    setIsSelecting(false);
+  
+    // Check intersections while dragging
     if (!selectionRect) return;
 
-    // Check which images are in selection
-    const selected = images.filter((img) => {
-      const imageRect = {
+    const selectedImages = images.filter(img => {
+      const imgRect = {
         x: img.x,
         y: img.y,
-        width: 200,
-        height: 200,
+        width: IMAGE_WIDTH,
+        height: IMAGE_HEIGHT
       };
-
+  
       return (
-        imageRect.x < selectionRect.x + selectionRect.width &&
-        imageRect.x + imageRect.width > selectionRect.x &&
-        imageRect.y < selectionRect.y + selectionRect.height &&
-        imageRect.y + imageRect.height > selectionRect.y
+        imgRect.x < selectionRect.x + selectionRect.width &&
+        imgRect.x + imgRect.width > selectionRect.x &&
+        imgRect.y < selectionRect.y + selectionRect.height &&
+        imgRect.y + imgRect.height > selectionRect.y
       );
     });
-
-    setSelectedIds(selected.map((img) => img.id));
+  
+    setSelectedIds(selectedImages.map(img => img.id));
+  }, [isSelecting, images, selectionRect]);
+  
+  const handleMouseUp = useCallback(() => {
+    setIsSelecting(false);
+    selectionStart.current = null;
     setSelectionRect(null);
-  };
+  }, []);
 
   // Update renderGrid callback
   const renderGrid = useCallback(() => {
@@ -368,14 +385,17 @@ const Canva = () => {
       e.stopPropagation();
     };
 
-    container.addEventListener("dragover", handleDragOver);
-    container.addEventListener("drop", handleDrop);
+    // Add event listeners directly to container
+    container.addEventListener("dragover", handleDragOver, false);
+    container.addEventListener("drop", handleDrop, false);
 
     return () => {
       container.removeEventListener("dragover", handleDragOver);
       container.removeEventListener("drop", handleDrop);
+      // Clean up object URLs
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [handleDrop]);
+  }, [handleDrop, objectUrls]);
 
   // Add keyboard event effect
   useEffect(() => {
@@ -537,6 +557,23 @@ const Canva = () => {
       objectUrls.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [objectUrls]);
+
+  // Update initial image loading
+  useEffect(() => {
+    const loadInitialImages = () => {
+      const initialImages = imageUrls.map((url, index) => ({
+        id: `image-${index}`,
+        url,
+        x: (index % GRID_COLUMNS) * (IMAGE_WIDTH + IMAGE_GAP) + IMAGE_GAP,
+        y:
+          Math.floor(index / GRID_COLUMNS) * (IMAGE_HEIGHT + IMAGE_GAP) +
+          IMAGE_GAP,
+      }));
+      setImages(initialImages);
+    };
+
+    loadInitialImages();
+  }, []); // Empty dependency array means this runs once on mount
 
   if (!mounted) {
     return null; // or loading state
