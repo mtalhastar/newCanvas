@@ -503,6 +503,7 @@ const Canva = () => {
     });
   }, []);
 
+
   useEffect(() => {
     const container = stageRef.current?.container();
     if (!container) return;
