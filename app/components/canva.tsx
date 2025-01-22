@@ -179,7 +179,7 @@ const Canva = () => {
       updateViewport({
         scale: newScale,
         x: pointer.x - mousePointTo.x * newScale,
-        y: pointer.y - mousePointTo.y * newScale,
+        y: mousePointTo.y * newScale,
       });
     },
     [viewport, updateViewport]
@@ -243,65 +243,66 @@ const Canva = () => {
   const handleMouseDown = useCallback((e: KonvaEventObject<MouseEvent>) => {
     const stage = e.target.getStage();
     if (!stage) return;
-  
+
     const clickedOnEmpty = e.target === stage;
     if (clickedOnEmpty) {
       setSelectedIds([]);
       setIsSelecting(true);
       const pos = stage.getPointerPosition();
       if (!pos) return;
-      
+
       selectionStart.current = {
         x: (pos.x - stage.x()) / stage.scaleX(),
-        y: (pos.y - stage.y()) / stage.scaleY()
+        y: (pos.y - stage.y()) / stage.scaleY(),
       };
       setSelectionRect({
         x: pos.x,
         y: pos.y,
         width: 0,
-        height: 0
+        height: 0,
       });
     }
   }, []);
-  
-  const handleMouseMove = useCallback((e: KonvaEventObject<MouseEvent>) => {
-    if (!isSelecting || !selectionStart.current) return;
-  
-    const stage = e.target.getStage();
-    if (!stage) return;
-  
-    const pos = stage.getPointerPosition();
-    if (!pos) return;
-  
-    setSelectionRect({
-      x: Math.min(pos.x, selectionStart.current.x),
-      y: Math.min(pos.y, selectionStart.current.y),
-      width: Math.abs(pos.x - selectionStart.current.x),
-      height: Math.abs(pos.y - selectionStart.current.y)
-    });
-  
-    // Check intersections while dragging
-    if (!selectionRect) return;
 
-    const selectedImages = images.filter(img => {
-      const imgRect = {
-        x: img.x,
-        y: img.y,
-        width: IMAGE_WIDTH,
-        height: IMAGE_HEIGHT
-      };
-  
-      return (
-        imgRect.x < selectionRect.x + selectionRect.width &&
-        imgRect.x + imgRect.width > selectionRect.x &&
-        imgRect.y < selectionRect.y + selectionRect.height &&
-        imgRect.y + imgRect.height > selectionRect.y
-      );
-    });
-  
-    setSelectedIds(selectedImages.map(img => img.id));
-  }, [isSelecting, images, selectionRect]);
-  
+  const handleMouseMove = useCallback(
+    (e: KonvaEventObject<MouseEvent>) => {
+      if (!isSelecting || !selectionStart.current) return;
+
+      const stage = e.target.getStage();
+      if (!stage) return;
+
+      const pos = stage.getPointerPosition();
+      if (!pos) return;
+
+      setSelectionRect({
+        x: Math.min(pos.x, selectionStart.current.x),
+        y: Math.min(pos.y, selectionStart.current.y),
+        width: Math.abs(pos.x - selectionStart.current.x),
+        height: Math.abs(pos.y - selectionStart.current.y),
+      });
+
+      // Check intersections while dragging
+      const selectedImages = images.filter((img) => {
+        const imgRect = {
+          x: img.x,
+          y: img.y,
+          width: IMAGE_WIDTH,
+          height: IMAGE_HEIGHT,
+        };
+
+        return selectionRect
+          ? imgRect.x < selectionRect.x + selectionRect.width &&
+              imgRect.x + imgRect.width > selectionRect.x &&
+              imgRect.y < selectionRect.y + selectionRect.height &&
+              imgRect.y + imgRect.height > selectionRect.y
+          : false;
+      });
+
+      setSelectedIds(selectedImages.map((img) => img.id));
+    },
+    [isSelecting, images, selectionRect]
+  );
+
   const handleMouseUp = useCallback(() => {
     setIsSelecting(false);
     selectionStart.current = null;
@@ -465,15 +466,13 @@ const Canva = () => {
 
     const files = Array.from(e.dataTransfer?.files || []);
     files.forEach((file) => {
-      // Handle both SVG and other image types
-      if (file.type === "image/svg+xml" || file.type.startsWith("image/")) {
+      // Support all image formats including SVG
+      if (file.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
         const objectUrl = URL.createObjectURL(file);
 
-        // For SVGs, we need to load them first to get dimensions
         if (file.type === "image/svg+xml") {
-          const img = document.createElement("img");
-          img.width = 200;
-          img.height = 200;
+          // Handle SVG specifically
+          const img = new window.Image();
           img.onload = () => {
             setObjectUrls((prev) => [...prev, objectUrl]);
             setImages((prev) => [
@@ -488,6 +487,7 @@ const Canva = () => {
           };
           img.src = objectUrl;
         } else {
+          // Handle other image formats
           setObjectUrls((prev) => [...prev, objectUrl]);
           setImages((prev) => [
             ...prev,
@@ -507,50 +507,18 @@ const Canva = () => {
     const container = stageRef.current?.container();
     if (!container) return;
 
-    const handleFileDrop = (e: DragEvent) => {
+    container.addEventListener("dragover", (e) => {
       e.preventDefault();
       e.stopPropagation();
-
-      const stage = stageRef.current;
-      if (!stage) return;
-
-      const pos = stage.getPointerPosition();
-      if (!pos) return;
-
-      const stagePos = {
-        x: (pos.x - stage.x()) / stage.scaleX(),
-        y: (pos.y - stage.y()) / stage.scaleY(),
-      };
-
-      const files = Array.from(e.dataTransfer?.files || []);
-      files.forEach((file) => {
-        if (file.type.startsWith("image/")) {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            const imageUrl = event.target?.result as string;
-            setImages((prev) => [
-              ...prev,
-              {
-                id: `image-${Date.now()}`,
-                url: imageUrl,
-                x: stagePos.x,
-                y: stagePos.y,
-              },
-            ]);
-          };
-          reader.readAsDataURL(file);
-        }
-      });
-    };
-
-    container.addEventListener("dragover", (e) => e.preventDefault());
+    });
     container.addEventListener("drop", handleFileDrop);
 
     return () => {
       container.removeEventListener("dragover", (e) => e.preventDefault());
       container.removeEventListener("drop", handleFileDrop);
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, []);
+  }, [handleFileDrop, objectUrls]);
 
   useEffect(() => {
     return () => {
@@ -599,6 +567,8 @@ const Canva = () => {
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
+      onDragMove={handleDragMove}
+      onDragEnd={handleDragMove}
     >
       <Layer ref={gridLayerRef} listening={false}>
         <Group>{renderGrid()}</Group>
