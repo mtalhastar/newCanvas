@@ -246,7 +246,9 @@ const Canva = () => {
 
     const clickedOnEmpty = e.target === stage;
     if (clickedOnEmpty) {
-      setSelectedIds([]);
+      if (!e.evt.shiftKey) {
+        setSelectedIds([]);
+      }
       setIsSelecting(true);
       const pos = stage.getPointerPosition();
       if (!pos) return;
@@ -255,58 +257,59 @@ const Canva = () => {
         x: (pos.x - stage.x()) / stage.scaleX(),
         y: (pos.y - stage.y()) / stage.scaleY(),
       };
-      setSelectionRect({
-        x: pos.x,
-        y: pos.y,
-        width: 0,
-        height: 0,
-      });
     }
   }, []);
 
-  const handleMouseMove = useCallback(
-    (e: KonvaEventObject<MouseEvent>) => {
-      if (!isSelecting || !selectionStart.current) return;
-
-      const stage = e.target.getStage();
-      if (!stage) return;
-
-      const pos = stage.getPointerPosition();
-      if (!pos) return;
-
-      setSelectionRect({
-        x: Math.min(pos.x, selectionStart.current.x),
-        y: Math.min(pos.y, selectionStart.current.y),
-        width: Math.abs(pos.x - selectionStart.current.x),
-        height: Math.abs(pos.y - selectionStart.current.y),
-      });
-
-      // Check intersections while dragging
-      const selectedImages = images.filter((img) => {
-        const imgRect = {
-          x: img.x,
-          y: img.y,
-          width: IMAGE_WIDTH,
-          height: IMAGE_HEIGHT,
-        };
-
-        return selectionRect
-          ? imgRect.x < selectionRect.x + selectionRect.width &&
-              imgRect.x + imgRect.width > selectionRect.x &&
-              imgRect.y < selectionRect.y + selectionRect.height &&
-              imgRect.y + imgRect.height > selectionRect.y
-          : false;
-      });
-
-      setSelectedIds(selectedImages.map((img) => img.id));
-    },
-    [isSelecting, images, selectionRect]
-  );
+  const handleMouseMove = useCallback((e: KonvaEventObject<MouseEvent>) => {
+    if (!isSelecting || !selectionStart.current) return;
+  
+    const stage = e.target.getStage();
+    if (!stage) return;
+  
+    const pos = stage.getPointerPosition();
+    if (!pos) return;
+  
+    // Convert coordinates to stage space
+    const scale = stage.scaleX();
+    const currentPos = {
+      x: (pos.x - stage.x()) / scale,
+      y: (pos.y - stage.y()) / scale
+    };
+  
+    // Calculate selection rectangle
+    const selectionBounds = {
+      x: Math.min(currentPos.x, selectionStart.current.x),
+      y: Math.min(currentPos.y, selectionStart.current.y),
+      width: Math.abs(currentPos.x - selectionStart.current.x),
+      height: Math.abs(currentPos.y - selectionStart.current.y)
+    };
+  
+    setSelectionRect(selectionBounds);
+  
+    // Update selected images
+    const selectedImages = images.filter((img) => {
+      const imgRect = {
+        x: img.x,
+        y: img.y,
+        width: IMAGE_WIDTH,
+        height: IMAGE_HEIGHT
+      };
+  
+      return (
+        imgRect.x < selectionBounds.x + selectionBounds.width &&
+        imgRect.x + imgRect.width > selectionBounds.x &&
+        imgRect.y < selectionBounds.y + selectionBounds.height &&
+        imgRect.y + imgRect.height > selectionBounds.y
+      );
+    });
+  
+    setSelectedIds(selectedImages.map(img => img.id));
+  }, [isSelecting, images]);
 
   const handleMouseUp = useCallback(() => {
     setIsSelecting(false);
-    selectionStart.current = null;
     setSelectionRect(null);
+    selectionStart.current = null;
   }, []);
 
   // Update renderGrid callback
@@ -502,7 +505,6 @@ const Canva = () => {
       }
     });
   }, []);
-
 
   useEffect(() => {
     const container = stageRef.current?.container();
