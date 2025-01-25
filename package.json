@@ -9,13 +9,18 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@chakra-ui/react": "^3.5.1",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
     "@types/lodash": "^4.17.14",
     "canvas": "^3.0.1",
+    "framer-motion": "^12.0.5",
     "konva": "^9.3.18",
     "lodash": "^4.17.21",
     "next": "15.1.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-icons": "^5.4.0",
     "react-konva": "^19.0.2",
     "use-image": "^1.1.1"
   },

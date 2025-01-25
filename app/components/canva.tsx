@@ -1,9 +1,10 @@
 "use client";
-import { Stage, Layer, Circle, Image, Group, Rect } from "react-konva";
+import { Stage, Layer, Circle, Image, Group, Rect, Line } from "react-konva";
 import type Konva from "konva";
 import { useState, useEffect, useRef, useCallback } from "react";
 import useImage from "use-image";
 import { KonvaEventObject } from "konva/lib/Node";
+import React from "react";
 
 const GRID_SIZE = 50;
 const INITIAL_SCALE = 1;
@@ -40,57 +41,77 @@ const imageUrls = [
 
 // Add to interfaces
 interface DraggableImageProps {
+  id: string;
   url: string;
   x: number;
   y: number;
   isSelected: boolean;
+  selectedIds: string[];
+  onGroupDrag: (deltaX: number, deltaY: number) => void;
   onClick: (e: KonvaEventObject<MouseEvent>) => void;
   onDelete: () => void;
 }
 
+// Add to interface section
+interface Shape {
+  id: string;
+  type: "rectangle" | "circle";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  strokeWidth: number;
+}
+
 // Update DraggableImage component
 const DraggableImage = ({
+  id,
   url,
   x,
   y,
   isSelected,
+  selectedIds,
+  onGroupDrag,
   onClick,
 }: DraggableImageProps) => {
   const [image] = useImage(url);
-  const [position, setPosition] = useState({ x, y });
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-
-  useEffect(() => {
-    if (image) {
-      setDimensions({
-        width: image.naturalWidth,
-        height: image.naturalHeight,
-      });
-    }
-  }, [image]);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
   return (
-    <Image
-      image={image}
-      x={position.x}
-      y={position.y}
-      width={dimensions.width}
-      height={dimensions.height}
-      draggable
-      onClick={onClick}
-      stroke={isSelected ? "#0096FF" : undefined}
-      strokeWidth={isSelected ? 2 : 0}
-      shadowEnabled={true}
-      shadowColor={isSelected ? "#0096FF" : "black"}
-      shadowBlur={isSelected ? 10 : 5}
-      shadowOpacity={0.6}
-      onDragEnd={(e) => {
-        setPosition({
-          x: e.target.x(),
-          y: e.target.y(),
-        });
-      }}
-    />
+    <React.Fragment>
+      <Image
+        image={image}
+        x={x}
+        y={y}
+        draggable
+        onClick={onClick}
+        onDragStart={(e) => {
+          setDragStart({
+            x: e.target.x(),
+            y: e.target.y(),
+          });
+        }}
+        onDragMove={(e) => {
+          if (isSelected && selectedIds.length > 1) {
+            const deltaX = e.target.x() - dragStart.x;
+            const deltaY = e.target.y() - dragStart.y;
+            onGroupDrag(deltaX, deltaY);
+          }
+        }}
+      />
+      {isSelected && (
+        <Rect
+          x={x - 2}
+          y={y - 2}
+          width={image?.width || 0 + 4}
+          height={image?.height || 0 + 4}
+          stroke="#0096FF"
+          strokeWidth={2}
+          dash={[5, 5]}
+        />
+      )}
+    </React.Fragment>
   );
 };
 
@@ -126,6 +147,173 @@ interface SelectionRect {
   height: number;
 }
 
+// Add CanvasControls component
+const CanvasControls = ({
+  onZoomIn,
+  onZoomOut,
+  onPan,
+}: {
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onPan: (dx: number, dy: number) => void;
+}) => {
+  const PAN_AMOUNT = 50;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        bottom: "20px",
+        right: "20px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+        background: "white",
+        padding: "10px",
+        borderRadius: "4px",
+        boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+      }}
+    >
+      <div style={{ display: "flex", gap: "4px" }}>
+        <button
+          onClick={onZoomIn}
+          style={{ padding: "4px 8px", cursor: "pointer" }}
+        >
+          +
+        </button>
+        <button
+          onClick={onZoomOut}
+          style={{ padding: "4px 8px", cursor: "pointer" }}
+        >
+          -
+        </button>
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: "4px",
+        }}
+      >
+        <button
+          style={{ padding: "4px 8px", cursor: "pointer" }}
+          onClick={() => onPan(PAN_AMOUNT, 0)}
+        >
+          ←
+        </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+          <button
+            style={{ padding: "4px 8px", cursor: "pointer" }}
+            onClick={() => onPan(0, PAN_AMOUNT)}
+          >
+            ↑
+          </button>
+
+          <button
+            style={{ padding: "4px 8px", cursor: "pointer" }}
+            onClick={() => onPan(0, -PAN_AMOUNT)}
+          >
+            ↓
+          </button>
+        </div>
+        <button
+          onClick={() => onPan(-PAN_AMOUNT, 0)}
+          style={{ padding: "4px 8px", cursor: "pointer" }}
+        >
+          →
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Add tool types
+type ToolType = "select" | "pen" | "rectangle" | "circle";
+
+// Add toolbar component
+const Toolbar = ({
+  activeTool,
+  setActiveTool,
+  strokeColor,
+  setStrokeColor,
+  strokeWidth,
+  setStrokeWidth,
+}: {
+  activeTool: ToolType;
+  setActiveTool: (tool: ToolType) => void;
+  strokeColor: string;
+  setStrokeColor: (color: string) => void;
+  strokeWidth: number;
+  setStrokeWidth: (width: number) => void;
+}) => {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: "20px",
+        left: "20px",
+        background: "white",
+        padding: "10px",
+        borderRadius: "4px",
+        boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+      }}
+    >
+      <button
+        onClick={() => setActiveTool("select")}
+        style={{
+          padding: "4px 8px",
+          background: activeTool === "select" ? "#eee" : "white",
+        }}
+      >
+        Select
+      </button>
+      <button
+        onClick={() => setActiveTool("pen")}
+        style={{
+          padding: "4px 8px",
+          background: activeTool === "pen" ? "#eee" : "white",
+        }}
+      >
+        Pen
+      </button>
+      <button
+        onClick={() => setActiveTool("rectangle")}
+        style={{
+          padding: "4px 8px",
+          background: activeTool === "rectangle" ? "#eee" : "white",
+        }}
+      >
+        Rectangle
+      </button>
+      <button
+        onClick={() => setActiveTool("circle")}
+        style={{
+          padding: "4px 8px",
+          background: activeTool === "circle" ? "#eee" : "white",
+        }}
+      >
+        Circle
+      </button>
+      <input
+        type="color"
+        value={strokeColor}
+        onChange={(e) => setStrokeColor(e.target.value)}
+      />
+      <input
+        type="range"
+        min="1"
+        max="20"
+        value={strokeWidth}
+        onChange={(e) => setStrokeWidth(Number(e.target.value))}
+      />
+    </div>
+  );
+};
+
+// Add handlers to main component
 const Canva = () => {
   // 1. All state hooks
   const [mounted, setMounted] = useState(false);
@@ -145,6 +333,14 @@ const Canva = () => {
   );
   const [isSelecting, setIsSelecting] = useState(false);
   const selectionStart = useRef<{ x: number; y: number } | null>(null);
+
+  // Add states for drawing
+  const [activeTool, setActiveTool] = useState<ToolType>("select");
+  const [strokeColor, setStrokeColor] = useState("#000000");
+  const [strokeWidth, setStrokeWidth] = useState(2);
+  const [lines, setLines] = useState<any[]>([]);
+  const [shapes, setShapes] = useState<Shape[]>([]);
+  const isDrawing = useRef(false);
 
   // 2. All ref hooks
   const stageRef = useRef<Konva.Stage>(null);
@@ -213,23 +409,47 @@ const Canva = () => {
       y: (pos.y - stage.y()) / stage.scaleY(),
     };
 
-    // Process dropped files
-    const files = Array.from(e.dataTransfer?.files || []);
-    files.forEach((file) => {
-      if (file.type.startsWith("image/")) {
-        const objectUrl = URL.createObjectURL(file);
-        setObjectUrls((prev) => [...prev, objectUrl]);
-        setImages((prev) => [
-          ...prev,
-          {
-            id: `image-${Date.now()}`,
-            url: objectUrl,
-            x: stagePos.x,
-            y: stagePos.y,
-          },
-        ]);
-      }
-    });
+    // Handle both files and URLs
+    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+      // Handle file drops
+      const files = Array.from(e.dataTransfer.files);
+      files.forEach((file) => {
+        if (file.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
+          const objectUrl = URL.createObjectURL(file);
+          setObjectUrls((prev) => [...prev, objectUrl]);
+          setImages((prev) => [
+            ...prev,
+            {
+              id: `image-${Date.now()}`,
+              url: objectUrl,
+              x: stagePos.x,
+              y: stagePos.y,
+            },
+          ]);
+        }
+      });
+    } else if (e.dataTransfer?.getData("text").startsWith("file:///")) {
+      // Handle local file URLs
+      const fileUrl = e.dataTransfer.getData("text");
+      const localPath = decodeURI(fileUrl.replace("file:///", ""));
+
+      // Create a File object from local path
+      fetch(fileUrl)
+        .then((res) => res.blob())
+        .then((blob) => {
+          const objectUrl = URL.createObjectURL(blob);
+          setObjectUrls((prev) => [...prev, objectUrl]);
+          setImages((prev) => [
+            ...prev,
+            {
+              id: `image-${Date.now()}`,
+              url: objectUrl,
+              x: stagePos.x,
+              y: stagePos.y,
+            },
+          ]);
+        });
+    }
   }, []);
 
   // Add to callback hooks
@@ -240,77 +460,113 @@ const Canva = () => {
     }
   }, [selectedId]);
 
-  const handleMouseDown = useCallback((e: KonvaEventObject<MouseEvent>) => {
-    const stage = e.target.getStage();
-    if (!stage) return;
+  const handleMouseDown = useCallback(
+    (e: KonvaEventObject<MouseEvent>) => {
+      const stage = e.target.getStage();
+      if (!stage) return;
 
-    const clickedOnEmpty = e.target === stage;
-    if (clickedOnEmpty) {
-      if (!e.evt.shiftKey) {
-        setSelectedIds([]);
+      // Handle based on active tool
+      if (activeTool === "select") {
+        const clickedOnEmpty = e.target === stage;
+        if (clickedOnEmpty) {
+          if (!e.evt.shiftKey) setSelectedIds([]);
+          setIsSelecting(true);
+          const pos = stage.getPointerPosition();
+          if (!pos) return;
+          selectionStart.current = {
+            x: (pos.x - stage.x()) / stage.scaleX(),
+            y: (pos.y - stage.y()) / stage.scaleY(),
+          };
+        }
+      } else {
+        // Drawing tools
+        isDrawing.current = true;
+        const pos = stage.getPointerPosition();
+        if (!pos) return;
+
+        const stagePos = {
+          x: (pos.x - stage.x()) / stage.scaleX(),
+          y: (pos.y - stage.y()) / stage.scaleY(),
+        };
+
+        if (activeTool === "pen") {
+          setLines([
+            ...lines,
+            {
+              points: [stagePos.x, stagePos.y],
+              color: strokeColor,
+              width: strokeWidth,
+            },
+          ]);
+        } else {
+          setShapes([
+            ...shapes,
+            {
+              id: `shape-${Date.now()}`,
+              type: activeTool,
+              x: stagePos.x,
+              y: stagePos.y,
+              width: 0,
+              height: 0,
+              color: strokeColor,
+              strokeWidth,
+            },
+          ]);
+        }
       }
-      setIsSelecting(true);
-      const pos = stage.getPointerPosition();
-      if (!pos) return;
+    },
+    [activeTool, strokeColor, strokeWidth, lines, shapes]
+  );
 
-      selectionStart.current = {
-        x: (pos.x - stage.x()) / stage.scaleX(),
-        y: (pos.y - stage.y()) / stage.scaleY(),
-      };
-    }
-  }, []);
+  const handleMouseMove = useCallback(
+    (e: KonvaEventObject<MouseEvent>) => {
+      const stage = e.target.getStage();
+      if (!stage) return;
 
-  const handleMouseMove = useCallback((e: KonvaEventObject<MouseEvent>) => {
-    if (!isSelecting || !selectionStart.current) return;
-  
-    const stage = e.target.getStage();
-    if (!stage) return;
-  
-    const pos = stage.getPointerPosition();
-    if (!pos) return;
-  
-    // Convert coordinates to stage space
-    const scale = stage.scaleX();
-    const currentPos = {
-      x: (pos.x - stage.x()) / scale,
-      y: (pos.y - stage.y()) / scale
-    };
-  
-    // Calculate selection rectangle
-    const selectionBounds = {
-      x: Math.min(currentPos.x, selectionStart.current.x),
-      y: Math.min(currentPos.y, selectionStart.current.y),
-      width: Math.abs(currentPos.x - selectionStart.current.x),
-      height: Math.abs(currentPos.y - selectionStart.current.y)
-    };
-  
-    setSelectionRect(selectionBounds);
-  
-    // Update selected images
-    const selectedImages = images.filter((img) => {
-      const imgRect = {
-        x: img.x,
-        y: img.y,
-        width: IMAGE_WIDTH,
-        height: IMAGE_HEIGHT
-      };
-  
-      return (
-        imgRect.x < selectionBounds.x + selectionBounds.width &&
-        imgRect.x + imgRect.width > selectionBounds.x &&
-        imgRect.y < selectionBounds.y + selectionBounds.height &&
-        imgRect.y + imgRect.height > selectionBounds.y
-      );
-    });
-  
-    setSelectedIds(selectedImages.map(img => img.id));
-  }, [isSelecting, images]);
+      if (activeTool === "select" && isSelecting && selectionStart.current) {
+        // Selection logic
+        const pos = stage.getPointerPosition();
+        if (!pos) return;
+        // ...existing selection code...
+      } else if (isDrawing.current) {
+        // Drawing logic
+        const pos = stage.getPointerPosition();
+        if (!pos) return;
+
+        const stagePos = {
+          x: (pos.x - stage.x()) / stage.scaleX(),
+          y: (pos.y - stage.y()) / stage.scaleY(),
+        };
+
+        if (activeTool === "pen") {
+          const lastLine = lines[lines.length - 1];
+          lastLine.points = lastLine.points.concat([stagePos.x, stagePos.y]);
+          setLines([...lines.slice(0, -1), lastLine]);
+        } else {
+          const lastShape = shapes[shapes.length - 1];
+          setShapes([
+            ...shapes.slice(0, -1),
+            {
+              ...lastShape,
+              width: stagePos.x - lastShape.x,
+              height: stagePos.y - lastShape.y,
+            },
+          ]);
+        }
+      }
+    },
+    [activeTool, isSelecting, lines, shapes]
+  );
 
   const handleMouseUp = useCallback(() => {
-    setIsSelecting(false);
-    setSelectionRect(null);
-    selectionStart.current = null;
-  }, []);
+    if (activeTool === "select") {
+      setIsSelecting(false);
+      setSelectionRect(null);
+      selectionStart.current = null;
+    } else {
+      isDrawing.current = false;
+    }
+  }, [activeTool]);
 
   // Update renderGrid callback
   const renderGrid = useCallback(() => {
@@ -389,17 +645,53 @@ const Canva = () => {
       e.stopPropagation();
     };
 
-    // Add event listeners directly to container
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      const pos = stage.getPointerPosition();
+      if (!pos) return;
+
+      const stagePos = {
+        x: (pos.x - stage.x()) / stage.scaleX(),
+        y: (pos.y - stage.y()) / stage.scaleY(),
+      };
+
+      const files = Array.from(e.dataTransfer?.files || []);
+      files.forEach((file) => {
+        if (file.type.startsWith("image/")) {
+          const objectUrl = URL.createObjectURL(file);
+          setObjectUrls((prev) => [...prev, objectUrl]);
+          setImages((prev) => [
+            ...prev,
+            {
+              id: `image-${Date.now()}`,
+              url: objectUrl,
+              x: stagePos.x,
+              y: stagePos.y,
+            },
+          ]);
+        }
+      });
+    };
+
+    // Add listeners directly to container
     container.addEventListener("dragover", handleDragOver, false);
     container.addEventListener("drop", handleDrop, false);
+    container.addEventListener("dragenter", (e) => e.preventDefault(), false);
+    container.addEventListener("dragleave", (e) => e.preventDefault(), false);
 
     return () => {
       container.removeEventListener("dragover", handleDragOver);
       container.removeEventListener("drop", handleDrop);
-      // Clean up object URLs
+      container.removeEventListener("dragenter", (e) => e.preventDefault());
+      container.removeEventListener("dragleave", (e) => e.preventDefault());
       objectUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [handleDrop, objectUrls]);
+  }, []);
 
   // Add keyboard event effect
   useEffect(() => {
@@ -546,72 +838,226 @@ const Canva = () => {
     loadInitialImages();
   }, []); // Empty dependency array means this runs once on mount
 
+  // Add to main Canvas component
+  const handleGroupDrag = useCallback(
+    (deltaX: number, deltaY: number) => {
+      setImages((prev) =>
+        prev.map((img) => {
+          if (selectedIds.includes(img.id)) {
+            return {
+              ...img,
+              x: img.x + deltaX,
+              y: img.y + deltaY,
+            };
+          }
+          return img;
+        })
+      );
+    },
+    [selectedIds]
+  );
+
+  const handleZoomIn = useCallback(() => {
+    updateViewport({
+      ...viewport,
+      scale: Math.min(viewport.scale * ZOOM_FACTOR, MAX_SCALE),
+    });
+  }, [viewport, updateViewport]);
+
+  const handleZoomOut = useCallback(() => {
+    updateViewport({
+      ...viewport,
+      scale: Math.max(viewport.scale / ZOOM_FACTOR, MIN_SCALE),
+    });
+  }, [viewport, updateViewport]);
+
+  const handlePan = useCallback(
+    (dx: number, dy: number) => {
+      updateViewport({
+        ...viewport,
+        x: viewport.x + dx,
+        y: viewport.y + dy,
+      });
+    },
+    [viewport, updateViewport]
+  );
+
+  // Add delete handler
+  const handleDelete = useCallback(() => {
+    if (selectedIds.length > 0) {
+      setShapes((prev) =>
+        prev.filter((shape) => !selectedIds.includes(shape.id))
+      );
+      setImages((prev) => prev.filter((img) => !selectedIds.includes(img.id)));
+      setSelectedIds([]);
+    }
+  }, [selectedIds]);
+
+  // Add keyboard event listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Delete" || e.key === "Backspace") {
+        handleDelete();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleDelete]);
+
   if (!mounted) {
     return null; // or loading state
   }
 
   return (
-    <Stage
-      ref={stageRef}
-      width={stageDimensions.width}
-      height={stageDimensions.height}
-      draggable={!isSelecting}
-      onWheel={handleWheel}
-      x={viewport.x}
-      y={viewport.y}
-      scale={{ x: viewport.scale, y: viewport.scale }}
-      onClick={(e) => {
-        // Deselect when clicking on stage
-        const clickedOnEmpty = e.target === e.target.getStage();
-        if (clickedOnEmpty) {
-          setSelectedId(null);
-        }
-      }}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onDragMove={handleDragMove}
-      onDragEnd={handleDragMove}
-    >
-      <Layer ref={gridLayerRef} listening={false}>
-        <Group>{renderGrid()}</Group>
-      </Layer>
-      <Layer>
-        {images.map((img) => (
-          <DraggableImage
-            key={img.id}
-            url={img.url}
-            x={img.x}
-            y={img.y}
-            isSelected={selectedIds.includes(img.id)}
-            onClick={(e) => {
-              e.evt.stopPropagation();
-              const isShiftPressed = e.evt.shiftKey;
-              if (isShiftPressed) {
-                setSelectedIds((prev) =>
-                  prev.includes(img.id)
-                    ? prev.filter((id) => id !== img.id)
-                    : [...prev, img.id]
-                );
-              } else {
-                setSelectedIds([img.id]);
-              }
-            }}
-            onDelete={() => handleImageDelete()}
-          />
-        ))}
-        {selectionRect && (
-          <Rect
-            x={selectionRect.x}
-            y={selectionRect.y}
-            width={selectionRect.width}
-            height={selectionRect.height}
-            fill="rgba(0,0,255,0.1)"
-            stroke="#0096FF"
-          />
-        )}
-      </Layer>
-    </Stage>
+    <div style={{ position: "relative" }}>
+      <Stage
+        ref={stageRef}
+        width={stageDimensions.width}
+        height={stageDimensions.height}
+        draggable={activeTool === "select" && !isSelecting} // Only allow drag in select mode
+        onWheel={handleWheel}
+        x={viewport.x}
+        y={viewport.y}
+        scale={{ x: viewport.scale, y: viewport.scale }}
+        onClick={(e) => {
+          // Deselect when clicking on stage
+          const clickedOnEmpty = e.target === e.target.getStage();
+          if (clickedOnEmpty) {
+            setSelectedId(null);
+          }
+        }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onDragMove={handleDragMove}
+        onDragEnd={handleDragMove}
+      >
+        <Layer ref={gridLayerRef} listening={false}>
+          <Group>{renderGrid()}</Group>
+        </Layer>
+        <Layer>
+          {images.map((img) => (
+            <DraggableImage
+              key={img.id}
+              id={img.id}
+              url={img.url}
+              x={img.x}
+              y={img.y}
+              isSelected={selectedIds.includes(img.id)}
+              selectedIds={selectedIds}
+              onGroupDrag={handleGroupDrag}
+              onClick={(e) => {
+                e.evt.stopPropagation();
+                const isShiftPressed = e.evt.shiftKey;
+                if (isShiftPressed) {
+                  setSelectedIds((prev) =>
+                    prev.includes(img.id)
+                      ? prev.filter((id) => id !== img.id)
+                      : [...prev, img.id]
+                  );
+                } else {
+                  setSelectedIds([img.id]);
+                }
+              }}
+              onDelete={() => handleImageDelete()}
+            />
+          ))}
+          {selectionRect && (
+            <Rect
+              x={selectionRect.x}
+              y={selectionRect.y}
+              width={selectionRect.width}
+              height={selectionRect.height}
+              fill="rgba(0,0,255,0.1)"
+              stroke="#0096FF"
+            />
+          )}
+        </Layer>
+        <Layer>
+          {lines.map((line, i) => (
+            <Line
+              key={i}
+              points={line.points}
+              stroke={line.color}
+              strokeWidth={line.width}
+              tension={0.5}
+              lineCap="round"
+            />
+          ))}
+          {shapes.map((shape) => {
+            const isSelected = selectedIds.includes(shape.id);
+            if (shape.type === "rectangle") {
+              return (
+                <React.Fragment key={shape.id}>
+                  <Rect
+                    x={shape.x}
+                    y={shape.y}
+                    width={shape.width}
+                    height={shape.height}
+                    stroke={shape.color}
+                    strokeWidth={shape.strokeWidth}
+                    onClick={(e) => {
+                      if (!e.evt.shiftKey) setSelectedIds([]);
+                      setSelectedIds((prev) => [...prev, shape.id]);
+                    }}
+                  />
+                  {isSelected && (
+                    <Rect
+                      x={shape.x - 2}
+                      y={shape.y - 2}
+                      width={shape.width + 4}
+                      height={shape.height + 4}
+                      stroke="#0096FF"
+                      strokeWidth={2}
+                      dash={[5, 5]}
+                    />
+                  )}
+                </React.Fragment>
+              );
+            }
+            return (
+              <React.Fragment key={shape.id}>
+                <Circle
+                  x={shape.x}
+                  y={shape.y}
+                  radius={Math.abs(shape.width)}
+                  stroke={shape.color}
+                  strokeWidth={shape.strokeWidth}
+                  onClick={(e) => {
+                    if (!e.evt.shiftKey) setSelectedIds([]);
+                    setSelectedIds((prev) => [...prev, shape.id]);
+                  }}
+                />
+                {isSelected && (
+                  <Circle
+                    x={shape.x}
+                    y={shape.y}
+                    radius={Math.abs(shape.width) + 2}
+                    stroke="#0096FF"
+                    strokeWidth={2}
+                    dash={[5, 5]}
+                  />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </Layer>
+      </Stage>
+      <CanvasControls
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onPan={handlePan}
+      />
+      <Toolbar
+        activeTool={activeTool}
+        setActiveTool={setActiveTool}
+        strokeColor={strokeColor}
+        setStrokeColor={setStrokeColor}
+        strokeWidth={strokeWidth}
+        setStrokeWidth={setStrokeWidth}
+      />
+    </div>
   );
 };
 
