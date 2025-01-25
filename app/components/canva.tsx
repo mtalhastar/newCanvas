@@ -27,6 +27,23 @@ const GRID_COLUMNS = 3;
 const IMAGE_WIDTH = 200;
 const IMAGE_HEIGHT = 200;
 
+// Add state persistence utils
+const STORAGE_KEY = "canvas_state";
+
+const saveToLocalStorage = (state: {
+  images: CanvasImage[];
+  shapes: Shape[];
+  lines: any[];
+  viewport: ViewportState;
+}) => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+};
+
+// Add debounced save function
+const debouncedSave = debounce((state: any) => {
+  saveToLocalStorage(state);
+}, 1000);
+
 interface ViewportState {
   x: number;
   y: number;
@@ -905,6 +922,29 @@ const Canva = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleDelete]);
 
+  // Add to useEffect for loading saved state
+  useEffect(() => {
+    const savedState = localStorage.getItem(STORAGE_KEY);
+    if (savedState) {
+      const { images, shapes, lines, viewport } = JSON.parse(savedState);
+      setImages(images);
+      setShapes(shapes);
+      setLines(lines);
+      updateViewport(viewport);
+    }
+  }, []);
+
+  // Add state change listener
+  useEffect(() => {
+    const currentState = {
+      images,
+      shapes,
+      lines,
+      viewport,
+    };
+    debouncedSave(currentState);
+  }, [images, shapes, lines, viewport]);
+
   if (!mounted) {
     return null; // or loading state
   }
@@ -1060,5 +1100,18 @@ const Canva = () => {
     </div>
   );
 };
+
+// Add debounce utility
+function debounce(func: Function, wait: number) {
+  let timeout: NodeJS.Timeout;
+  return function executedFunction(...args: any[]) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
 
 export default Canva;
