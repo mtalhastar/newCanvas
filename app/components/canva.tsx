@@ -945,6 +945,120 @@ const Canva = () => {
     debouncedSave(currentState);
   }, [images, shapes, lines, viewport]);
 
+  // Add drag handlers
+  const handleDragEnter = (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDragLeave = (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleFileOrUrlDrop = useCallback(
+    (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      const pos = stage.getPointerPosition();
+      if (!pos) return;
+
+      // Convert to stage coordinates considering viewport transform
+      const stagePos = {
+        x: (pos.x - viewport.x) / viewport.scale,
+        y: (pos.y - viewport.y) / viewport.scale,
+      };
+
+      // Handle File Drops
+      if (e.dataTransfer?.files?.length) {
+        Array.from(e.dataTransfer.files).forEach((file) => {
+          if (file.type.startsWith("image/")) {
+            const objectUrl = URL.createObjectURL(file);
+            setImages((prev) => [
+              ...prev,
+              {
+                id: `image-${Date.now()}`,
+                url: objectUrl,
+                x: stagePos.x,
+                y: stagePos.y,
+              },
+            ]);
+            setObjectUrls((prev) => [...prev, objectUrl]);
+          }
+        });
+      }
+      // Handle URL drops (both network and local files)
+      else {
+        // Try different data types for URL extraction
+        const url =
+          e.dataTransfer?.getData("URL") ||
+          e.dataTransfer?.getData("text/uri-list") ||
+          e.dataTransfer?.getData("text");
+
+        if (url) {
+          // Handle local file paths (file://)
+          if (url.startsWith("file://")) {
+            fetch(url)
+              .then((res) => res.blob())
+              .then((blob) => {
+                const objectUrl = URL.createObjectURL(blob);
+                setImages((prev) => [
+                  ...prev,
+                  {
+                    id: `image-${Date.now()}`,
+                    url: objectUrl,
+                    x: stagePos.x,
+                    y: stagePos.y,
+                  },
+                ]);
+                setObjectUrls((prev) => [...prev, objectUrl]);
+              });
+          }
+          // Handle network URLs
+          else if (url.startsWith("http")) {
+            setImages((prev) => [
+              ...prev,
+              {
+                id: `image-${Date.now()}`,
+                url: url,
+                x: stagePos.x,
+                y: stagePos.y,
+              },
+            ]);
+          }
+        }
+      }
+    },
+    [viewport.x, viewport.y, viewport.scale]
+  );
+
+  // Update event listeners
+  useEffect(() => {
+    const container = stageRef.current?.container();
+    if (!container) return;
+
+    const handleDrag = (e: DragEvent) => e.preventDefault();
+
+    container.addEventListener("dragover", handleDrag);
+    container.addEventListener("dragenter", handleDrag);
+    container.addEventListener("drop", (e) => handleFileOrUrlDrop(e));
+
+    return () => {
+      container.removeEventListener("dragover", handleDrag);
+      container.removeEventListener("dragenter", handleDrag);
+      container.removeEventListener("drop", (e) => handleFileOrUrlDrop(e));
+    };
+  }, [handleFileOrUrlDrop]);
+
   if (!mounted) {
     return null; // or loading state
   }
