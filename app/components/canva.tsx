@@ -369,34 +369,7 @@ const Canva = () => {
     setViewport(newViewport);
   }, []);
 
-  const handleWheel = useCallback(
-    (e: KonvaEventObject<WheelEvent>) => {
-      e.evt.preventDefault();
-      const stage = stageRef.current;
-      if (!stage) return;
-
-      const pointer = stage.getPointerPosition();
-      if (!pointer) return;
-
-      const oldScale = viewport.scale;
-      const newScale =
-        e.evt.deltaY > 0
-          ? Math.max(oldScale / ZOOM_FACTOR, MIN_SCALE)
-          : Math.min(oldScale * ZOOM_FACTOR, MAX_SCALE);
-
-      const mousePointTo = {
-        x: (pointer.x - viewport.x) / oldScale,
-        y: (pointer.y - viewport.y) / oldScale,
-      };
-
-      updateViewport({
-        scale: newScale,
-        x: pointer.x - mousePointTo.x * newScale,
-        y: mousePointTo.y * newScale,
-      });
-    },
-    [viewport, updateViewport]
-  );
+  // This code block was intentionally removed as it was duplicated
 
   const handleDragMove = useCallback(
     (e: KonvaEventObject<DragEvent>) => {
@@ -584,6 +557,57 @@ const Canva = () => {
       isDrawing.current = false;
     }
   }, [activeTool]);
+
+  const lastTouchPositions = useRef<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  } | null>(null);
+
+  // Update the handleWheel function
+  const handleWheel = useCallback(
+    (e: KonvaEventObject<WheelEvent>) => {
+      e.evt.preventDefault();
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      // Handle trackpad pan (two-finger scroll)
+      if (!e.evt.ctrlKey) {
+        const deltaX = e.evt.deltaX;
+        const deltaY = e.evt.deltaY;
+
+        updateViewport({
+          ...viewport,
+          x: viewport.x - deltaX,
+          y: viewport.y - deltaY,
+        });
+        return;
+      }
+
+      // Original zoom handling for ctrl+wheel
+      const pointer = stage.getPointerPosition();
+      if (!pointer) return;
+
+      const oldScale = viewport.scale;
+      const newScale =
+        e.evt.deltaY > 0
+          ? Math.max(oldScale / ZOOM_FACTOR, MIN_SCALE)
+          : Math.min(oldScale * ZOOM_FACTOR, MAX_SCALE);
+
+      const mousePointTo = {
+        x: (pointer.x - viewport.x) / oldScale,
+        y: (pointer.y - viewport.y) / oldScale,
+      };
+
+      updateViewport({
+        scale: newScale,
+        x: pointer.x - mousePointTo.x * newScale,
+        y: pointer.y - mousePointTo.y * newScale,
+      });
+    },
+    [viewport, updateViewport]
+  );
 
   // Update renderGrid callback
   const renderGrid = useCallback(() => {
@@ -1074,6 +1098,64 @@ const Canva = () => {
         x={viewport.x}
         y={viewport.y}
         scale={{ x: viewport.scale, y: viewport.scale }}
+        onTouchStart={(e) => {
+          const touches = e.evt.touches;
+          if (touches.length === 2) {
+            e.evt.preventDefault();
+            lastTouchPositions.current = {
+              x1: touches[0].clientX,
+              y1: touches[0].clientY,
+              x2: touches[1].clientX,
+              y2: touches[1].clientY,
+            };
+          }
+        }}
+        onTouchMove={(e) => {
+          const touches = e.evt.touches;
+          if (touches.length === 2 && lastTouchPositions.current) {
+            e.evt.preventDefault();
+
+            // Calculate movement delta
+            const currentX1 = touches[0].clientX;
+            const currentY1 = touches[0].clientY;
+            const currentX2 = touches[1].clientX;
+            const currentY2 = touches[1].clientY;
+
+            // Calculate previous and current center points
+            const prevCenter = {
+              x:
+                (lastTouchPositions.current.x1 +
+                  lastTouchPositions.current.x2) /
+                2,
+              y:
+                (lastTouchPositions.current.y1 +
+                  lastTouchPositions.current.y2) /
+                2,
+            };
+            const currentCenter = {
+              x: (currentX1 + currentX2) / 2,
+              y: (currentY1 + currentY2) / 2,
+            };
+
+            // Update viewport position
+            updateViewport({
+              ...viewport,
+              x: viewport.x + (currentCenter.x - prevCenter.x),
+              y: viewport.y + (currentCenter.y - prevCenter.y),
+            });
+
+            // Update touch positions
+            lastTouchPositions.current = {
+              x1: currentX1,
+              y1: currentY1,
+              x2: currentX2,
+              y2: currentY2,
+            };
+          }
+        }}
+        onTouchEnd={() => {
+          lastTouchPositions.current = null;
+        }}
         onClick={(e) => {
           // Deselect when clicking on stage
           const clickedOnEmpty = e.target === e.target.getStage();
