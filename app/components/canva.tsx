@@ -17,10 +17,6 @@ const MIN_SCALE = 0.1;
 const MAX_SCALE = 5;
 const ZOOM_FACTOR = 1.06;
 
-// Add these constants
-const BASE_GRID_SIZE = 50;
-const MIN_VISIBLE_GRID_SIZE = 20;
-
 // Update constants at top
 const IMAGE_GAP = 1000; // Increased gap between images
 const GRID_COLUMNS = 3;
