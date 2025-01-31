@@ -510,12 +510,81 @@ const Canva = () => {
       if (!stage) return;
 
       if (activeTool === "select" && isSelecting && selectionStart.current) {
-        // Selection logic
         const pos = stage.getPointerPosition();
-        if (!pos) return;
-        // ...existing selection code...
+        if (!pos || !selectionStart.current) return;
+
+        // Convert pointer position to stage coordinates
+        const stageX = (pos.x - stage.x()) / stage.scaleX();
+        const stageY = (pos.y - stage.y()) / stage.scaleY();
+
+        // Calculate selection rectangle
+        const rect = {
+          x: Math.min(selectionStart.current.x, stageX),
+          y: Math.min(selectionStart.current.y, stageY),
+          width: Math.abs(stageX - selectionStart.current.x),
+          height: Math.abs(stageY - selectionStart.current.y),
+        };
+        setSelectionRect(rect);
+
+        // Find intersecting elements
+        const selectedElements: string[] = [];
+
+        // Check image intersections
+        for (const img of images) {
+          const imgRight = img.x + IMAGE_WIDTH;
+          const imgBottom = img.y + IMAGE_HEIGHT;
+
+          if (
+            rect.x < imgRight &&
+            rect.x + rect.width > img.x &&
+            rect.y < imgBottom &&
+            rect.y + rect.height > img.y
+          ) {
+            selectedElements.push(img.id);
+          }
+        }
+
+        // Check shape intersections
+        for (const shape of shapes) {
+          if (shape.type === "rectangle") {
+            // Rectangle-to-rectangle collision
+            if (
+              rect.x < shape.x + shape.width &&
+              rect.x + rect.width > shape.x &&
+              rect.y < shape.y + shape.height &&
+              rect.y + rect.height > shape.y
+            ) {
+              selectedElements.push(shape.id);
+            }
+          } else {
+            // Circle-to-rectangle collision (using bounding box)
+            const radius = Math.abs(shape.width);
+            const circleLeft = shape.x - radius;
+            const circleRight = shape.x + radius;
+            const circleTop = shape.y - radius;
+            const circleBottom = shape.y + radius;
+
+            if (
+              rect.x < circleRight &&
+              rect.x + rect.width > circleLeft &&
+              rect.y < circleBottom &&
+              rect.y + rect.height > circleTop
+            ) {
+              selectedElements.push(shape.id);
+            }
+          }
+        }
+
+        // Update selection based on shift key
+        if (e.evt.shiftKey) {
+          setSelectedIds((prev) => [
+            ...new Set([...prev, ...selectedElements]), // Remove duplicates
+          ]);
+        } else {
+          setSelectedIds(selectedElements);
+        }
       } else if (isDrawing.current) {
-        // Drawing logic
+        // Existing drawing logic
         const pos = stage.getPointerPosition();
         if (!pos) return;
 
@@ -541,7 +610,7 @@ const Canva = () => {
         }
       }
     },
-    [activeTool, isSelecting, lines, shapes]
+    [activeTool, isSelecting, images, shapes, lines, viewport.scale]
   );
 
   const handleMouseUp = useCallback(() => {
