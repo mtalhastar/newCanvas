@@ -2,6 +2,14 @@
 import { Stage, Layer, Circle, Image, Group, Rect, Line } from "react-konva";
 import type Konva from "konva";
 import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  Pointer as TextSelection,
+  PenTool,
+  Square,
+  Circle as CircleIcon,
+  Undo,
+  Redo,
+} from "lucide-react";
 import useImage from "use-image";
 import { KonvaEventObject } from "konva/lib/Node";
 import React from "react";
@@ -40,6 +48,13 @@ const debouncedSave = debounce((state: any) => {
   saveToLocalStorage(state);
 }, 1000);
 
+interface CanvasState {
+  images: CanvasImage[];
+  shapes: Shape[];
+  lines: any[];
+  viewport: ViewportState;
+}
+
 interface ViewportState {
   x: number;
   y: number;
@@ -64,6 +79,8 @@ interface DraggableImageProps {
   onClick: (e: KonvaEventObject<MouseEvent>) => void;
   onDelete: () => void;
 }
+
+// New state for group dragging
 
 // Add to interface section
 interface Shape {
@@ -251,6 +268,10 @@ const Toolbar = ({
   setStrokeColor,
   strokeWidth,
   setStrokeWidth,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
 }: {
   activeTool: ToolType;
   setActiveTool: (tool: ToolType) => void;
@@ -258,62 +279,62 @@ const Toolbar = ({
   setStrokeColor: (color: string) => void;
   strokeWidth: number;
   setStrokeWidth: (width: number) => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }) => {
   return (
     <div
       style={{
         position: "absolute",
-        top: "20px",
-        left: "20px",
+        bottom: "20px",
+        left: "40%",
+        right: "30%",
         background: "white",
         padding: "10px",
         borderRadius: "4px",
         boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
         display: "flex",
-        flexDirection: "column",
-        gap: "8px",
+        justifyContent: "space-between",
+        flexDirection: "row",
+        gap: "20px",
       }}
     >
-      <button
-        onClick={() => setActiveTool("select")}
-        style={{
-          padding: "4px 8px",
-          background: activeTool === "select" ? "#eee" : "white",
-        }}
-      >
-        Select
+      <button onClick={() => setActiveTool("select")}>
+        <TextSelection
+          color={activeTool === "select" ? "blue" : "black"}
+          size={24}
+        />
       </button>
-      <button
-        onClick={() => setActiveTool("pen")}
-        style={{
-          padding: "4px 8px",
-          background: activeTool === "pen" ? "#eee" : "white",
-        }}
-      >
-        Pen
+      <button onClick={() => setActiveTool("pen")}>
+        <PenTool color={activeTool === "pen" ? "blue" : "black"} size={24} />
       </button>
-      <button
-        onClick={() => setActiveTool("rectangle")}
-        style={{
-          padding: "4px 8px",
-          background: activeTool === "rectangle" ? "#eee" : "white",
-        }}
-      >
-        Rectangle
+      <button onClick={() => setActiveTool("rectangle")}>
+        <Square
+          color={activeTool === "rectangle" ? "blue" : "black"}
+          size={24}
+        />
       </button>
-      <button
-        onClick={() => setActiveTool("circle")}
-        style={{
-          padding: "4px 8px",
-          background: activeTool === "circle" ? "#eee" : "white",
-        }}
-      >
-        Circle
+      <button onClick={() => setActiveTool("circle")}>
+        <CircleIcon
+          color={activeTool === "circle" ? "blue" : "black"}
+          size={24}
+        />
       </button>
       <input
         type="color"
         value={strokeColor}
         onChange={(e) => setStrokeColor(e.target.value)}
+        style={{
+          width: "32px",
+          height: "32px",
+          border: "none",
+          borderRadius: "50%",
+          padding: "0",
+          cursor: "pointer",
+          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.2)",
+        }}
       />
       <input
         type="range"
@@ -321,7 +342,14 @@ const Toolbar = ({
         max="20"
         value={strokeWidth}
         onChange={(e) => setStrokeWidth(Number(e.target.value))}
+        
       />
+      <button onClick={onUndo} disabled={!canUndo}>
+        <Undo color={canUndo ? "black" : "gray"} size={24} />
+      </button>
+      <button onClick={onRedo} disabled={!canRedo}>
+        <Redo color={canUndo ? "black" : "gray"} size={24} />
+      </button>
     </div>
   );
 };
@@ -359,6 +387,11 @@ const Canva = () => {
   const stageRef = useRef<Konva.Stage>(null);
   const gridLayerRef = useRef<Konva.Layer>(null);
   const rafRef = useRef<number | null>(null);
+  const [isGroupDragging, setIsGroupDragging] = useState(false);
+  const groupDragStartPos = useRef({ x: 0, y: 0 });
+  const initialGroupPositions = useRef<
+    Record<string, { x: number; y: number }>
+  >({});
 
   // 3. All callback hooks - define ALL of them here
   const updateViewport = useCallback((newViewport: ViewportState) => {
@@ -366,6 +399,15 @@ const Canva = () => {
   }, []);
 
   // This code block was intentionally removed as it was duplicated
+
+  const [history, setHistory] = useState<CanvasState[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(-1);
+  const stateRef = useRef<CanvasState>({
+    images: [],
+    shapes: [],
+    lines: [],
+    viewport: { x: 0, y: 0, scale: INITIAL_SCALE },
+  });
 
   const handleDragMove = useCallback(
     (e: KonvaEventObject<DragEvent>) => {
@@ -451,9 +493,41 @@ const Canva = () => {
       const stage = e.target.getStage();
       if (!stage) return;
 
-      // Handle based on active tool
       if (activeTool === "select") {
-        const clickedOnEmpty = e.target === stage;
+        const target = e.target;
+        const targetId = target.id();
+        const isSelected = selectedIds.includes(targetId);
+
+        // Start group drag if clicking on a selected item
+        if (isSelected && selectedIds.length > 1) {
+          const pos = stage.getPointerPosition();
+          if (pos) {
+            groupDragStartPos.current = { x: pos.x, y: pos.y };
+
+            // Store initial positions of all selected items
+            const positions: Record<string, { x: number; y: number }> = {};
+
+            // For images
+            images.forEach((img) => {
+              if (selectedIds.includes(img.id)) {
+                positions[img.id] = { x: img.x, y: img.y };
+              }
+            });
+
+            // For shapes
+            shapes.forEach((shape) => {
+              if (selectedIds.includes(shape.id)) {
+                positions[shape.id] = { x: shape.x, y: shape.y };
+              }
+            });
+
+            initialGroupPositions.current = positions;
+            setIsGroupDragging(true);
+          }
+          return;
+        }
+
+        const clickedOnEmpty = target === stage;
         if (clickedOnEmpty) {
           if (!e.evt.shiftKey) setSelectedIds([]);
           setIsSelecting(true);
@@ -509,15 +583,55 @@ const Canva = () => {
       const stage = e.target.getStage();
       if (!stage) return;
 
-      if (activeTool === "select" && isSelecting && selectionStart.current) {
+      // Handle group dragging of selected items
+      if (isGroupDragging) {
         const pos = stage.getPointerPosition();
-        if (!pos || !selectionStart.current) return;
+        if (pos && initialGroupPositions.current) {
+          // Convert pointer movement to stage coordinates (considering zoom level)
+          const deltaX = (pos.x - groupDragStartPos.current.x) / viewport.scale;
+          const deltaY = (pos.y - groupDragStartPos.current.y) / viewport.scale;
 
-        // Convert pointer position to stage coordinates
+          // Update images positions
+          setImages((prevImages) =>
+            prevImages.map((img) => {
+              if (selectedIds.includes(img.id)) {
+                const initial = initialGroupPositions.current[img.id];
+                return {
+                  ...img,
+                  x: initial.x + deltaX,
+                  y: initial.y + deltaY,
+                };
+              }
+              return img;
+            })
+          );
+
+          // Update shapes positions
+          setShapes((prevShapes) =>
+            prevShapes.map((shape) => {
+              if (selectedIds.includes(shape.id)) {
+                const initial = initialGroupPositions.current[shape.id];
+                return {
+                  ...shape,
+                  x: initial.x + deltaX,
+                  y: initial.y + deltaY,
+                };
+              }
+              return shape;
+            })
+          );
+        }
+      }
+      // Handle selection rectangle
+      else if (isSelecting && selectionStart.current) {
+        const pos = stage.getPointerPosition();
+        if (!pos) return;
+
+        // Convert pointer position to stage coordinates (relative to viewport)
         const stageX = (pos.x - stage.x()) / stage.scaleX();
         const stageY = (pos.y - stage.y()) / stage.scaleY();
 
-        // Calculate selection rectangle
+        // Calculate selection rectangle dimensions
         const rect = {
           x: Math.min(selectionStart.current.x, stageX),
           y: Math.min(selectionStart.current.y, stageY),
@@ -527,10 +641,10 @@ const Canva = () => {
         setSelectionRect(rect);
 
         // Find intersecting elements
-        const selectedElements: string[] = [];
+        const newSelectedIds: string[] = [];
 
         // Check image intersections
-        for (const img of images) {
+        images.forEach((img) => {
           const imgRight = img.x + IMAGE_WIDTH;
           const imgBottom = img.y + IMAGE_HEIGHT;
 
@@ -540,12 +654,12 @@ const Canva = () => {
             rect.y < imgBottom &&
             rect.y + rect.height > img.y
           ) {
-            selectedElements.push(img.id);
+            newSelectedIds.push(img.id);
           }
-        }
+        });
 
         // Check shape intersections
-        for (const shape of shapes) {
+        shapes.forEach((shape) => {
           if (shape.type === "rectangle") {
             // Rectangle-to-rectangle collision
             if (
@@ -554,10 +668,10 @@ const Canva = () => {
               rect.y < shape.y + shape.height &&
               rect.y + rect.height > shape.y
             ) {
-              selectedElements.push(shape.id);
+              newSelectedIds.push(shape.id);
             }
           } else {
-            // Circle-to-rectangle collision (using bounding box)
+            // Circle-to-rectangle collision (approximate with bounding box)
             const radius = Math.abs(shape.width);
             const circleLeft = shape.x - radius;
             const circleRight = shape.x + radius;
@@ -570,34 +684,38 @@ const Canva = () => {
               rect.y < circleBottom &&
               rect.y + rect.height > circleTop
             ) {
-              selectedElements.push(shape.id);
+              newSelectedIds.push(shape.id);
             }
           }
-        }
+        });
 
         // Update selection based on shift key
         if (e.evt.shiftKey) {
           setSelectedIds((prev) => [
-            ...new Set([...prev, ...selectedElements]), // Remove duplicates
+            ...new Set([...prev, ...newSelectedIds]), // Remove duplicates
           ]);
         } else {
-          setSelectedIds(selectedElements);
+          setSelectedIds(newSelectedIds);
         }
-      } else if (isDrawing.current) {
-        // Existing drawing logic
+      }
+      // Handle drawing tools
+      else if (isDrawing.current) {
         const pos = stage.getPointerPosition();
         if (!pos) return;
 
+        // Convert to stage coordinates considering viewport
         const stagePos = {
           x: (pos.x - stage.x()) / stage.scaleX(),
           y: (pos.y - stage.y()) / stage.scaleY(),
         };
 
         if (activeTool === "pen") {
+          // Update current line
           const lastLine = lines[lines.length - 1];
           lastLine.points = lastLine.points.concat([stagePos.x, stagePos.y]);
           setLines([...lines.slice(0, -1), lastLine]);
-        } else {
+        } else if (activeTool === "rectangle" || activeTool === "circle") {
+          // Update current shape dimensions
           const lastShape = shapes[shapes.length - 1];
           setShapes([
             ...shapes.slice(0, -1),
@@ -610,7 +728,16 @@ const Canva = () => {
         }
       }
     },
-    [activeTool, isSelecting, images, shapes, lines, viewport.scale]
+    [
+      activeTool,
+      isGroupDragging,
+      isSelecting,
+      images,
+      shapes,
+      lines,
+      selectedIds,
+      viewport.scale,
+    ]
   );
 
   const handleMouseUp = useCallback(() => {
@@ -618,10 +745,15 @@ const Canva = () => {
       setIsSelecting(false);
       setSelectionRect(null);
       selectionStart.current = null;
+      if (isGroupDragging) {
+        addHistoryEntry(stateRef.current);
+        setIsGroupDragging(false);
+      }
     } else {
       isDrawing.current = false;
+      addHistoryEntry(stateRef.current);
     }
-  }, [activeTool]);
+  }, [activeTool, isGroupDragging]);
 
   const lastTouchPositions = useRef<{
     x1: number;
@@ -714,6 +846,23 @@ const Canva = () => {
     }
     return gridDots;
   }, [viewport, stageDimensions]);
+
+  useEffect(() => {
+    stateRef.current = {
+      images,
+      shapes,
+      lines,
+      viewport,
+    };
+  }, [images, shapes, lines, viewport]);
+
+  const addHistoryEntry = (newState: CanvasState) => {
+    setHistory((prevHistory) => {
+      const newHistory = [...prevHistory.slice(0, currentIndex + 1), newState];
+      return newHistory;
+    });
+    setCurrentIndex((prevIndex) => prevIndex + 1);
+  };
 
   // 4. All effect hooks
   useEffect(() => {
@@ -964,10 +1113,13 @@ const Canva = () => {
   );
 
   const handleZoomIn = useCallback(() => {
-    updateViewport({
-      ...viewport,
-      scale: Math.min(viewport.scale * ZOOM_FACTOR, MAX_SCALE),
-    });
+    const newScale = Math.min(viewport.scale * ZOOM_FACTOR, MAX_SCALE);
+    const newState = {
+      ...stateRef.current,
+      viewport: { ...viewport, scale: newScale },
+    };
+    addHistoryEntry(newState);
+    updateViewport(newState.viewport);
   }, [viewport, updateViewport]);
 
   const handleZoomOut = useCallback(() => {
@@ -991,13 +1143,22 @@ const Canva = () => {
   // Add delete handler
   const handleDelete = useCallback(() => {
     if (selectedIds.length > 0) {
-      setShapes((prev) =>
-        prev.filter((shape) => !selectedIds.includes(shape.id))
+      const newImages = images.filter((img) => !selectedIds.includes(img.id));
+      const newShapes = shapes.filter(
+        (shape) => !selectedIds.includes(shape.id)
       );
-      setImages((prev) => prev.filter((img) => !selectedIds.includes(img.id)));
+      const newState = {
+        images: newImages,
+        shapes: newShapes,
+        lines: lines,
+        viewport: viewport,
+      };
+      addHistoryEntry(newState);
+      setImages(newImages);
+      setShapes(newShapes);
       setSelectedIds([]);
     }
-  }, [selectedIds]);
+  }, [selectedIds, images, shapes, lines, viewport]);
 
   // Add keyboard event listener
   useEffect(() => {
@@ -1020,8 +1181,55 @@ const Canva = () => {
       setShapes(shapes);
       setLines(lines);
       updateViewport(viewport);
+      setHistory([{ images, shapes, lines, viewport }]);
+      setCurrentIndex(0);
+    } else {
+      const initialImages = imageUrls.map((url, index) => ({
+        id: `image-${index}`,
+        url,
+        x: (index % GRID_COLUMNS) * (IMAGE_WIDTH + IMAGE_GAP) + IMAGE_GAP,
+        y:
+          Math.floor(index / GRID_COLUMNS) * (IMAGE_HEIGHT + IMAGE_GAP) +
+          IMAGE_GAP,
+      }));
+      const initialState = {
+        images: initialImages,
+        shapes: [],
+        lines: [],
+        viewport: { x: 0, y: 0, scale: INITIAL_SCALE },
+      };
+      setImages(initialImages);
+      setHistory([initialState]);
+      setCurrentIndex(0);
     }
   }, []);
+
+  const canUndo = currentIndex > 0;
+  const canRedo = currentIndex < history.length - 1;
+
+  const handleUndo = () => {
+    if (canUndo) {
+      const newIndex = currentIndex - 1;
+      const state = history[newIndex];
+      setImages(state.images);
+      setShapes(state.shapes);
+      setLines(state.lines);
+      updateViewport(state.viewport);
+      setCurrentIndex(newIndex);
+    }
+  };
+
+  const handleRedo = () => {
+    if (canRedo) {
+      const newIndex = currentIndex + 1;
+      const state = history[newIndex];
+      setImages(state.images);
+      setShapes(state.shapes);
+      setLines(state.lines);
+      updateViewport(state.viewport);
+      setCurrentIndex(newIndex);
+    }
+  };
 
   // Add state change listener
   useEffect(() => {
@@ -1067,6 +1275,15 @@ const Canva = () => {
         y: (pos.y - viewport.y) / viewport.scale,
       };
 
+      // Create state update after handling the drop
+      const newState = {
+        images: stateRef.current.images,
+        shapes: stateRef.current.shapes,
+        lines: stateRef.current.lines,
+        viewport: stateRef.current.viewport,
+      };
+      addHistoryEntry(newState);
+
       // Handle File Drops
       if (e.dataTransfer?.files?.length) {
         Array.from(e.dataTransfer.files).forEach((file) => {
@@ -1085,6 +1302,7 @@ const Canva = () => {
           }
         });
       }
+
       // Handle URL drops (both network and local files)
       else {
         // Try different data types for URL extraction
@@ -1357,6 +1575,10 @@ const Canva = () => {
         setStrokeColor={setStrokeColor}
         strokeWidth={strokeWidth}
         setStrokeWidth={setStrokeWidth}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        canUndo={canUndo}
+        canRedo={canRedo}
       />
     </div>
   );
