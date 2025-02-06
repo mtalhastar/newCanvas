@@ -629,19 +629,50 @@ const Canva = () => {
     [activeTool, isSelecting, lines, shapes]
   );
 
-  const handleMouseUp = useCallback(() => {
-    if (isSelecting) {
-      setIsSelecting(false);
-      setSelectionRect(null);
-      selectionStart.current = null;
-      return;
-    }
-    if (isDrawing.current) {
-      isDrawing.current = false;
-      addHistoryEntry(stateRef.current);
-      return;
-    }
-  }, []);
+  const handleMouseUp = useCallback(
+    (e: KonvaEventObject<MouseEvent>) => {
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      // Stop selection mode (if active)
+      if (isSelecting) {
+        setIsSelecting(false);
+        setSelectionRect(null);
+        selectionStart.current = null;
+      }
+
+      // Stop any drawing in progress (pen, rectangle, circle)
+      if (isDrawing.current) {
+        isDrawing.current = false;
+
+        // Optionally: if the shape has negligible dimensions (i.e. click without drag)
+        // you might choose to discard it.
+        if (activeTool !== "pen") {
+          // For rectangle or circle, check if width/height is too small and remove if necessary.
+          const lastShape = shapes[shapes.length - 1];
+          if (
+            lastShape &&
+            Math.abs(lastShape.width) < 5 &&
+            Math.abs(lastShape.height) < 5
+          ) {
+            setShapes((prev) => prev.slice(0, prev.length - 1));
+          }
+        }
+
+        // Finalize the drawing and add a new entry in the history
+        addHistoryEntry(stateRef.current);
+      }
+    },
+    [
+      isSelecting,
+      activeTool,
+      shapes,
+      addHistoryEntry,
+      stateRef,
+      setSelectionRect,
+      setIsSelecting,
+    ]
+  );
 
   // ---------------------------------------------------------------------------
   // Group Drag Handle: When more than one item is selected, render a transparent,
@@ -1042,8 +1073,7 @@ const Canva = () => {
             />
           )}
         </Layer>
-
-        {/* Drawing (lines and shapes) Layer */}
+        
         <Layer>
           {lines.map((line, i) => (
             <Line
