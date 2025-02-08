@@ -8,7 +8,15 @@ import React, {
   Fragment,
   useMemo,
 } from "react";
-import { Stage, Layer, Circle, Image, Group, Rect, Line } from "react-konva";
+import {
+  Stage,
+  Layer,
+  Circle,
+  Image as KonvaImage,
+  Group,
+  Rect,
+  Line,
+} from "react-konva";
 import type Konva from "konva";
 import { KonvaEventObject } from "konva/lib/Node";
 import {
@@ -20,6 +28,7 @@ import {
   Redo,
 } from "lucide-react";
 import useImage from "use-image";
+import { useUpdateMyPresence, useOthers } from "../../liveblocks.config";
 
 // -----------------------------------------------------------------------------
 // Utility Functions
@@ -129,14 +138,16 @@ const DraggableImage = ({
   return (
     <>
       {/* Explicitly set the id so that KonvaEventObject.id() returns it */}
-      <Image
+      <KonvaImage
         id={id}
         image={image}
         x={x}
         y={y}
         draggable={selectedIds.length <= 1}
         onClick={onClick}
-        onDragEnd={(e) => onDragEnd(id, e.target.x(), e.target.y())}
+        onDragEnd={(e: KonvaEventObject<DragEvent>) =>
+          onDragEnd(id, e.target.x(), e.target.y())
+        }
         perfectDrawEnabled={false}
       />
       {isSelected && (
@@ -378,6 +389,19 @@ const Canva = () => {
     viewport: { x: 0, y: 0, scale: INITIAL_SCALE },
   });
 
+  const updateMyPresence = useUpdateMyPresence();
+  const others = useOthers();
+
+  const throttledUpdateViewport = useRef(
+    throttle((newViewport: ViewportState) => {
+      setViewport(newViewport);
+      if (stageRef.current) stageRef.current.batchDraw();
+    }, 16)
+  ).current;
+
+  // Add this near the top with other hooks
+  const [cursorImg] = useImage("/cursor.png");
+
   // ---------------------------------------------------------------------------
   // Compute Group Bounding Box for Selected Items
   // ---------------------------------------------------------------------------
@@ -413,10 +437,7 @@ const Canva = () => {
   // Update viewport and history helper functions
   // ---------------------------------------------------------------------------
   const updateViewport = useCallback((newViewport: ViewportState) => {
-    setViewport(newViewport);
-    if (stageRef.current) {
-      stageRef.current.batchDraw();
-    }
+    throttledUpdateViewport(newViewport);
   }, []);
 
   useEffect(() => {
@@ -466,7 +487,7 @@ const Canva = () => {
       updateViewport({
         scale: newScale,
         x: pointer.x - mousePointTo.x * newScale,
-        y: pointer.y - mousePointTo.y * newScale,
+        y: mousePointTo.y * newScale,
       });
     },
     [viewport, updateViewport]
@@ -480,15 +501,19 @@ const Canva = () => {
       const stage = e.target.getStage();
       if (!stage) return;
 
+      // If clicking on an existing shape (line, rect, or image), don’t start a new drawing.
+      const target = e.target;
+      const className = target.getClassName();
+      if (
+        className === "Line" ||
+        className === "Rect" ||
+        className === "Image"
+      ) {
+        return;
+      }
+
       if (activeTool === "select") {
-        const target = e.target;
-        const targetId = target.id();
-        // If clicking on a selected object (and more than one is selected),
-        // do nothing here—group dragging will be handled by the overlay.
-        if (selectedIds.includes(targetId) && selectedIds.length > 1) {
-          return;
-        }
-        // If clicking on empty space, start a selection rectangle.
+        // Selection mode: start selection rectangle if clicking on empty area.
         if (target === stage) {
           if (!e.evt.shiftKey) setSelectedIds([]);
           setIsSelecting(true);
@@ -498,8 +523,8 @@ const Canva = () => {
             x: (pos.x - stage.x()) / stage.scaleX(),
             y: (pos.y - stage.y()) / stage.scaleY(),
           };
-          return;
         }
+        return;
       }
 
       // For drawing tools:
@@ -510,10 +535,12 @@ const Canva = () => {
         x: (pos.x - stage.x()) / stage.scaleX(),
         y: (pos.y - stage.y()) / stage.scaleY(),
       };
+
       if (activeTool === "pen") {
         setLines([
           ...lines,
           {
+            id: `line-${Date.now()}`, // add an id
             points: [stagePos.x, stagePos.y],
             color: strokeColor,
             width: strokeWidth,
@@ -535,13 +562,23 @@ const Canva = () => {
         ]);
       }
     },
-    [activeTool, selectedIds, lines, shapes, strokeColor, strokeWidth]
+    [activeTool, lines, shapes, strokeColor, strokeWidth, setSelectedIds]
   );
 
   const handleMouseMove = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
       const stage = e.target.getStage();
       if (!stage) return;
+
+      // Update Liveblocks presence (cursor position)
+      const pos = stage.getPointerPosition();
+      if (pos) {
+        const stagePos = {
+          x: (pos.x - stage.x()) / stage.scaleX(),
+          y: (pos.y - stage.y()) / stage.scaleY(),
+        };
+        updateMyPresence({ cursor: stagePos });
+      }
 
       // If selecting (drawing a selection rectangle)
       if (isSelecting && selectionStart.current) {
@@ -754,15 +791,17 @@ const Canva = () => {
       const newShapes = shapes.filter(
         (shape) => !selectedIds.includes(shape.id)
       );
+      const newLines = lines.filter((line) => !selectedIds.includes(line.id));
       const newState = {
         images: newImages,
         shapes: newShapes,
-        lines,
+        lines: newLines,
         viewport,
       };
       addHistoryEntry(newState);
       setImages(newImages);
       setShapes(newShapes);
+      setLines(newLines);
       setSelectedIds([]);
     }
   }, [selectedIds, images, shapes, lines, viewport]);
@@ -1001,7 +1040,7 @@ const Canva = () => {
                 for (let y = startY; y <= endY; y += GRID_SIZE) {
                   gridDots.push(
                     <Circle
-                      key={`${x}-${y}`}
+                      key={`${x}-${y}`} // ensures a unique key for each dot
                       x={x}
                       y={y}
                       radius={1 / viewport.scale}
@@ -1017,8 +1056,6 @@ const Canva = () => {
             })()}
           </Group>
         </Layer>
-
-        {/* Images & Selection Rectangle Layer */}
         <Layer>
           {images.map((img) => (
             <DraggableImage
@@ -1073,17 +1110,36 @@ const Canva = () => {
             />
           )}
         </Layer>
-        
+
         <Layer>
-          {lines.map((line, i) => (
+          {lines.map((line) => (
             <Line
-              key={i}
+              key={line.id}
               points={line.points}
               stroke={line.color}
               strokeWidth={line.width}
               tension={0.5}
               lineCap="round"
               perfectDrawEnabled={false}
+              // Increase hit area further
+              hitStrokeWidth={Math.max(line.width + 20, 20)}
+              onClick={(e) => {
+                e.evt.stopPropagation();
+                if (e.evt.shiftKey) {
+                  setSelectedIds((prev) =>
+                    prev.includes(line.id)
+                      ? prev.filter((id) => id !== line.id)
+                      : [...prev, line.id]
+                  );
+                } else {
+                  setSelectedIds([line.id]);
+                }
+              }}
+              onTap={(e) => {
+                // Mirror onClick for touch events
+                e.evt.stopPropagation();
+                setSelectedIds([line.id]);
+              }}
             />
           ))}
           {shapes.map((shape) => {
@@ -1106,6 +1162,8 @@ const Canva = () => {
                   />
                   {isSelected && (
                     <Rect
+                      // Adding a key to the conditional element
+                      key={`${shape.id}-overlay`}
                       x={shape.x - 2}
                       y={shape.y - 2}
                       width={shape.width + 4}
@@ -1135,6 +1193,8 @@ const Canva = () => {
                 />
                 {isSelected && (
                   <Circle
+                    // Adding a key to the conditional element
+                    key={`${shape.id}-overlay`}
                     x={shape.x}
                     y={shape.y}
                     radius={Math.abs(shape.width) + 2}
@@ -1145,6 +1205,37 @@ const Canva = () => {
                   />
                 )}
               </Fragment>
+            );
+          })}
+        </Layer>
+        <Layer>
+          {/* Render other users' cursors */}
+          {others.map((other) => {
+            const otherCursor = other.presence?.cursor;
+            if (!otherCursor) return null;
+
+            // Use the cursorImg from the hook above
+            if (!cursorImg) {
+              return (
+                <Circle
+                  key={`cursor-${other.connectionId}`}
+                  x={otherCursor.x}
+                  y={otherCursor.y}
+                  radius={5}
+                  fill="blue"
+                />
+              );
+            }
+
+            return (
+              <KonvaImage
+                key={`cursor-${other.connectionId}`}
+                image={cursorImg}
+                x={otherCursor.x - 10}
+                y={otherCursor.y - 10}
+                width={50}
+                height={50}
+              />
             );
           })}
         </Layer>

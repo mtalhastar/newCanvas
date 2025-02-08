@@ -12,6 +12,8 @@
     "@chakra-ui/react": "^3.5.1",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
+    "@liveblocks/client": "^2.17.0",
+    "@liveblocks/react": "^2.17.0",
     "@types/lodash": "^4.17.14",
     "canvas": "^3.0.1",
     "framer-motion": "^12.0.5",
