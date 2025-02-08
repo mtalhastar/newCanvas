@@ -28,7 +28,16 @@ import {
   Redo,
 } from "lucide-react";
 import useImage from "use-image";
-import { useUpdateMyPresence, useOthers } from "../../liveblocks.config";
+import {
+  useUpdateMyPresence,
+  useOthers,
+  useStorage,
+  useMutation,
+  Storage,
+  Presence
+} from "../liveblocks.config";
+import { MutationContext } from "@liveblocks/react";
+import { BaseUserMeta, LiveObject } from "@liveblocks/client";
 
 // -----------------------------------------------------------------------------
 // Utility Functions
@@ -346,6 +355,9 @@ const Toolbar = ({
 // -----------------------------------------------------------------------------
 
 const Canva = () => {
+  // Konva Stage Ref
+  const stageRef = useRef<Konva.Stage>(null);
+
   // Viewport & Stage Dimensions
   const [viewport, setViewport] = useState<ViewportState>({
     x: 0,
@@ -354,9 +366,7 @@ const Canva = () => {
   });
   const [stageDimensions, setStageDimensions] = useState(INITIAL_DIMENSIONS);
 
-  // Images & Shapes State
-  const [images, setImages] = useState<CanvasImage[]>([]);
-  const [objectUrls, setObjectUrls] = useState<string[]>([]);
+  // Selection State
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectionRect, setSelectionRect] = useState<{
@@ -372,12 +382,7 @@ const Canva = () => {
   const [activeTool, setActiveTool] = useState<ToolType>("select");
   const [strokeColor, setStrokeColor] = useState("#000000");
   const [strokeWidth, setStrokeWidth] = useState(2);
-  const [lines, setLines] = useState<any[]>([]);
-  const [shapes, setShapes] = useState<Shape[]>([]);
   const isDrawing = useRef(false);
-
-  // Konva Stage Ref
-  const stageRef = useRef<Konva.Stage>(null);
 
   // History State for Undo/Redo
   const [history, setHistory] = useState<CanvasState[]>([]);
@@ -388,6 +393,35 @@ const Canva = () => {
     lines: [],
     viewport: { x: 0, y: 0, scale: INITIAL_SCALE },
   });
+
+  // Liveblocks state
+  const storage = useStorage((root) => root) as Storage | null;
+  const isStorageLoading = storage === null;
+  const shapes = (storage?.shapes ?? []) as Storage["shapes"];
+  const images = (storage?.images ?? []) as Storage["images"];
+  const lines = (storage?.lines ?? []) as Storage["lines"];
+  
+  // Create mutations for updating storage
+  const updateShapes = useMutation((
+    { storage }: MutationContext<Presence, Storage, BaseUserMeta>,
+    newShapes: Storage["shapes"]
+  ) => {
+    storage.set("shapes", newShapes);
+  }, []);
+
+  const updateImages = useMutation((
+    { storage }: MutationContext<Presence, Storage, BaseUserMeta>,
+    newImages: Storage["images"]
+  ) => {
+    storage.set("images", newImages);
+  }, []);
+
+  const updateLines = useMutation((
+    { storage }: MutationContext<Presence, Storage, BaseUserMeta>,
+    newLines: Storage["lines"]
+  ) => {
+    storage.set("lines", newLines);
+  }, []);
 
   const updateMyPresence = useUpdateMyPresence();
   const others = useOthers();
@@ -501,7 +535,6 @@ const Canva = () => {
       const stage = e.target.getStage();
       if (!stage) return;
 
-      // If clicking on an existing shape (line, rect, or image), don’t start a new drawing.
       const target = e.target;
       const className = target.getClassName();
       if (
@@ -513,7 +546,6 @@ const Canva = () => {
       }
 
       if (activeTool === "select") {
-        // Selection mode: start selection rectangle if clicking on empty area.
         if (target === stage) {
           if (!e.evt.shiftKey) setSelectedIds([]);
           setIsSelecting(true);
@@ -527,7 +559,6 @@ const Canva = () => {
         return;
       }
 
-      // For drawing tools:
       isDrawing.current = true;
       const pos = stage.getPointerPosition();
       if (!pos) return;
@@ -537,32 +568,28 @@ const Canva = () => {
       };
 
       if (activeTool === "pen") {
-        setLines([
-          ...lines,
-          {
-            id: `line-${Date.now()}`, // add an id
-            points: [stagePos.x, stagePos.y],
-            color: strokeColor,
-            width: strokeWidth,
-          },
-        ]);
+        const newLine = {
+          id: `line-${Date.now()}`,
+          points: [stagePos.x, stagePos.y],
+          color: strokeColor,
+          width: strokeWidth,
+        };
+        updateLines([...lines, newLine]);
       } else if (activeTool === "rectangle" || activeTool === "circle") {
-        setShapes([
-          ...shapes,
-          {
-            id: `shape-${Date.now()}`,
-            type: activeTool,
-            x: stagePos.x,
-            y: stagePos.y,
-            width: 0,
-            height: 0,
-            color: strokeColor,
-            strokeWidth,
-          },
-        ]);
+        const newShape = {
+          id: `shape-${Date.now()}`,
+          type: activeTool,
+          x: stagePos.x,
+          y: stagePos.y,
+          width: 0,
+          height: 0,
+          color: strokeColor,
+          strokeWidth,
+        };
+        updateShapes([...shapes, newShape]);
       }
     },
-    [activeTool, lines, shapes, strokeColor, strokeWidth, setSelectedIds]
+    [activeTool, lines, shapes, strokeColor, strokeWidth, updateLines, updateShapes]
   );
 
   const handleMouseMove = useCallback(
@@ -570,7 +597,6 @@ const Canva = () => {
       const stage = e.target.getStage();
       if (!stage) return;
 
-      // Update Liveblocks presence (cursor position)
       const pos = stage.getPointerPosition();
       if (pos) {
         const stagePos = {
@@ -580,7 +606,6 @@ const Canva = () => {
         updateMyPresence({ cursor: stagePos });
       }
 
-      // If selecting (drawing a selection rectangle)
       if (isSelecting && selectionStart.current) {
         const pos = stage.getPointerPosition();
         if (!pos) return;
@@ -638,7 +663,6 @@ const Canva = () => {
         return;
       }
 
-      // If using drawing tools, update the current drawing.
       if (isDrawing.current) {
         const pos = stage.getPointerPosition();
         if (!pos) return;
@@ -648,22 +672,23 @@ const Canva = () => {
         };
         if (activeTool === "pen") {
           const lastLine = lines[lines.length - 1];
-          lastLine.points = lastLine.points.concat([stagePos.x, stagePos.y]);
-          setLines([...lines.slice(0, -1), lastLine]);
+          const updatedLine = {
+            ...lastLine,
+            points: lastLine.points.concat([stagePos.x, stagePos.y]),
+          };
+          updateLines([...lines.slice(0, -1), updatedLine]);
         } else if (activeTool === "rectangle" || activeTool === "circle") {
           const lastShape = shapes[shapes.length - 1];
-          setShapes([
-            ...shapes.slice(0, -1),
-            {
-              ...lastShape,
-              width: stagePos.x - lastShape.x,
-              height: stagePos.y - lastShape.y,
-            },
-          ]);
+          const updatedShape = {
+            ...lastShape,
+            width: stagePos.x - lastShape.x,
+            height: stagePos.y - lastShape.y,
+          };
+          updateShapes([...shapes.slice(0, -1), updatedShape]);
         }
       }
     },
-    [activeTool, isSelecting, lines, shapes]
+    [activeTool, isSelecting, lines, shapes, updateLines, updateShapes]
   );
 
   const handleMouseUp = useCallback(
@@ -671,44 +696,30 @@ const Canva = () => {
       const stage = stageRef.current;
       if (!stage) return;
 
-      // Stop selection mode (if active)
       if (isSelecting) {
         setIsSelecting(false);
         setSelectionRect(null);
         selectionStart.current = null;
       }
 
-      // Stop any drawing in progress (pen, rectangle, circle)
       if (isDrawing.current) {
         isDrawing.current = false;
 
-        // Optionally: if the shape has negligible dimensions (i.e. click without drag)
-        // you might choose to discard it.
         if (activeTool !== "pen") {
-          // For rectangle or circle, check if width/height is too small and remove if necessary.
           const lastShape = shapes[shapes.length - 1];
           if (
             lastShape &&
             Math.abs(lastShape.width) < 5 &&
             Math.abs(lastShape.height) < 5
           ) {
-            setShapes((prev) => prev.slice(0, prev.length - 1));
+            updateShapes(shapes.slice(0, shapes.length - 1));
           }
         }
 
-        // Finalize the drawing and add a new entry in the history
         addHistoryEntry(stateRef.current);
       }
     },
-    [
-      isSelecting,
-      activeTool,
-      shapes,
-      addHistoryEntry,
-      stateRef,
-      setSelectionRect,
-      setIsSelecting,
-    ]
+    [isSelecting, activeTool, shapes, addHistoryEntry, stateRef, updateShapes]
   );
 
   // ---------------------------------------------------------------------------
@@ -720,23 +731,21 @@ const Canva = () => {
     const newPos = e.target.position();
     const deltaX = newPos.x - groupBBox.x;
     const deltaY = newPos.y - groupBBox.y;
-    // Update positions of all selected images.
-    setImages((prevImages) =>
-      prevImages.map((img) =>
-        selectedIds.includes(img.id)
-          ? { ...img, x: img.x + deltaX, y: img.y + deltaY }
-          : img
-      )
+    
+    const newImages = images.map((img: Storage["images"][0]) =>
+      selectedIds.includes(img.id)
+        ? { ...img, x: img.x + deltaX, y: img.y + deltaY }
+        : img
     );
-    // Update positions of all selected shapes.
-    setShapes((prevShapes) =>
-      prevShapes.map((shape) =>
-        selectedIds.includes(shape.id)
-          ? { ...shape, x: shape.x + deltaX, y: shape.y + deltaY }
-          : shape
-      )
+    
+    const newShapes = shapes.map((shape: Storage["shapes"][0]) =>
+      selectedIds.includes(shape.id)
+        ? { ...shape, x: shape.x + deltaX, y: shape.y + deltaY }
+        : shape
     );
-    // Reset the drag handle position to the computed group bounding box.
+    
+    updateImages(newImages);
+    updateShapes(newShapes);
     e.target.position({ x: groupBBox.x, y: groupBBox.y });
   };
 
@@ -763,58 +772,47 @@ const Canva = () => {
       files.forEach((file) => {
         if (file.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
           const objectUrl = URL.createObjectURL(file);
-          setObjectUrls((prev) => [...prev, objectUrl]);
-          setImages((prev) => [
-            ...prev,
-            {
-              id: `image-${Date.now()}`,
-              url: objectUrl,
-              x: stagePos.x,
-              y: stagePos.y,
-            },
-          ]);
+          const newImage: Storage["images"][0] = {
+            id: `image-${Date.now()}`,
+            url: objectUrl,
+            x: stagePos.x,
+            y: stagePos.y,
+          };
+          updateImages([...images, newImage]);
         }
       });
     }
-  }, []);
+  }, [images, updateImages]);
 
   const handleImageDelete = useCallback(() => {
     if (selectedId) {
-      setImages((prev) => prev.filter((img) => img.id !== selectedId));
+      const newImages = images.filter((img: Storage["images"][0]) => img.id !== selectedId);
+      updateImages(newImages);
       setSelectedId(null);
     }
-  }, [selectedId]);
+  }, [selectedId, images, updateImages]);
 
   const handleDelete = useCallback(() => {
     if (selectedIds.length > 0) {
-      const newImages = images.filter((img) => !selectedIds.includes(img.id));
-      const newShapes = shapes.filter(
-        (shape) => !selectedIds.includes(shape.id)
-      );
-      const newLines = lines.filter((line) => !selectedIds.includes(line.id));
-      const newState = {
-        images: newImages,
-        shapes: newShapes,
-        lines: newLines,
-        viewport,
-      };
-      addHistoryEntry(newState);
-      setImages(newImages);
-      setShapes(newShapes);
-      setLines(newLines);
+      const newImages = images.filter((img: Storage["images"][0]) => !selectedIds.includes(img.id));
+      const newShapes = shapes.filter((shape: Storage["shapes"][0]) => !selectedIds.includes(shape.id));
+      const newLines = lines.filter((line: Storage["lines"][0]) => !selectedIds.includes(line.id));
+      
+      updateImages(newImages);
+      updateShapes(newShapes);
+      updateLines(newLines);
       setSelectedIds([]);
     }
-  }, [selectedIds, images, shapes, lines, viewport]);
+  }, [selectedIds, images, shapes, lines, updateImages, updateShapes, updateLines]);
 
   const handleImageDragEnd = useCallback(
     (id: string, newX: number, newY: number) => {
-      setImages((prevImages) =>
-        prevImages.map((img) =>
-          img.id === id ? { ...img, x: newX, y: newY } : img
-        )
+      const newImages = images.map((img: Storage["images"][0]) =>
+        img.id === id ? { ...img, x: newX, y: newY } : img
       );
+      updateImages(newImages);
     },
-    []
+    [images, updateImages]
   );
 
   const handleFileDrop = useCallback((e: DragEvent) => {
@@ -832,19 +830,16 @@ const Canva = () => {
     files.forEach((file) => {
       if (file.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
         const objectUrl = URL.createObjectURL(file);
-        setObjectUrls((prev) => [...prev, objectUrl]);
-        setImages((prev) => [
-          ...prev,
-          {
-            id: `image-${Date.now()}`,
-            url: objectUrl,
-            x: stagePos.x,
-            y: stagePos.y,
-          },
-        ]);
+        const newImage = {
+          id: `image-${Date.now()}`,
+          url: objectUrl,
+          x: stagePos.x,
+          y: stagePos.y,
+        };
+        updateImages([...images, newImage]);
       }
     });
-  }, []);
+  }, [images, updateImages]);
 
   useEffect(() => {
     const container = stageRef.current?.container();
@@ -857,15 +852,8 @@ const Canva = () => {
     return () => {
       container.removeEventListener("dragover", (e) => e.preventDefault());
       container.removeEventListener("drop", handleFileDrop);
-      objectUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [handleFileDrop, objectUrls]);
-
-  useEffect(() => {
-    return () => {
-      objectUrls.forEach((url) => URL.revokeObjectURL(url));
-    };
-  }, [objectUrls]);
+  }, [handleFileDrop]);
 
   useEffect(() => {
     setStageDimensions({
@@ -896,9 +884,8 @@ const Canva = () => {
       container.removeEventListener("drop", handleDrop);
       container.removeEventListener("dragenter", (e) => e.preventDefault());
       container.removeEventListener("dragleave", (e) => e.preventDefault());
-      objectUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [handleDrop, objectUrls]);
+  }, [handleDrop]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -916,36 +903,33 @@ const Canva = () => {
     "https://xfigurabucket.s3.us-east-1.amazonaws.com/a_an_organic_villa_next_to_the_sea_at_the_base_and_a_futuristic_design_aesthetic__hyper_realistic_photograph_ideogram-v2_1x1_664320.png",
   ];
 
+  // Move initial data loading to a separate effect that runs only when storage is ready
   useEffect(() => {
-    const savedState = localStorage.getItem(STORAGE_KEY);
-    if (savedState) {
-      const { images, shapes, lines, viewport } = JSON.parse(savedState);
-      setImages(images);
-      setShapes(shapes);
-      setLines(lines);
-      updateViewport(viewport);
-      setHistory([{ images, shapes, lines, viewport }]);
-      setCurrentIndex(0);
-    } else {
-      const initialImages = imageUrls.map((url, index) => ({
-        id: `image-${index}`,
-        url,
-        x: (index % GRID_COLUMNS) * (IMAGE_WIDTH + IMAGE_GAP) + IMAGE_GAP,
-        y:
-          Math.floor(index / GRID_COLUMNS) * (IMAGE_HEIGHT + IMAGE_GAP) +
-          IMAGE_GAP,
-      }));
-      const initialState = {
-        images: initialImages,
-        shapes: [],
-        lines: [],
-        viewport: { x: 0, y: 0, scale: INITIAL_SCALE },
-      };
-      setImages(initialImages);
-      setHistory([initialState]);
-      setCurrentIndex(0);
-    }
-  }, []);
+    const initializeStorage = async () => {
+      // Only initialize if storage is ready and no images exist yet
+      if (storage && !isStorageLoading && images.length === 0) {
+        const initialImages = imageUrls.map((url, index) => ({
+          id: `image-${index}`,
+          url,
+          x: (index % GRID_COLUMNS) * (IMAGE_WIDTH + IMAGE_GAP) + IMAGE_GAP,
+          y: Math.floor(index / GRID_COLUMNS) * (IMAGE_HEIGHT + IMAGE_GAP) + IMAGE_GAP,
+        }));
+        
+        try {
+          // Initialize storage using mutations
+          await Promise.all([
+            updateImages(initialImages),
+            updateShapes([]),
+            updateLines([])
+          ]);
+        } catch (error) {
+          console.error('Failed to initialize storage:', error);
+        }
+      }
+    };
+
+    initializeStorage();
+  }, [storage, isStorageLoading, images.length, updateImages, updateShapes, updateLines]);
 
   const canUndo = currentIndex > 0;
   const canRedo = currentIndex < history.length - 1;
@@ -954,9 +938,9 @@ const Canva = () => {
     if (canUndo) {
       const newIndex = currentIndex - 1;
       const state = history[newIndex];
-      setImages(state.images);
-      setShapes(state.shapes);
-      setLines(state.lines);
+      updateImages(state.images);
+      updateShapes(state.shapes);
+      updateLines(state.lines);
       updateViewport(state.viewport);
       setCurrentIndex(newIndex);
     }
@@ -966,9 +950,9 @@ const Canva = () => {
     if (canRedo) {
       const newIndex = currentIndex + 1;
       const state = history[newIndex];
-      setImages(state.images);
-      setShapes(state.shapes);
-      setLines(state.lines);
+      updateImages(state.images);
+      updateShapes(state.shapes);
+      updateLines(state.lines);
       updateViewport(state.viewport);
       setCurrentIndex(newIndex);
     }
@@ -977,6 +961,20 @@ const Canva = () => {
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
+  if (isStorageLoading) {
+    return (
+      <div style={{ 
+        width: "100vw", 
+        height: "100vh", 
+        display: "flex", 
+        alignItems: "center", 
+        justifyContent: "center" 
+      }}>
+        Loading canvas...
+      </div>
+    );
+  }
+
   return (
     <div style={{ position: "relative" }}>
       <Stage
@@ -1025,22 +1023,16 @@ const Canva = () => {
               const padding = GRID_SIZE * 10;
               const viewWidth = stageDimensions.width / viewport.scale;
               const viewHeight = stageDimensions.height / viewport.scale;
-              const startX =
-                Math.floor((stageX - padding) / GRID_SIZE) * GRID_SIZE;
-              const endX =
-                Math.ceil((stageX + viewWidth + padding) / GRID_SIZE) *
-                GRID_SIZE;
-              const startY =
-                Math.floor((stageY - padding) / GRID_SIZE) * GRID_SIZE;
-              const endY =
-                Math.ceil((stageY + viewHeight + padding) / GRID_SIZE) *
-                GRID_SIZE;
+              const startX = Math.floor((stageX - padding) / GRID_SIZE) * GRID_SIZE;
+              const endX = Math.ceil((stageX + viewWidth + padding) / GRID_SIZE) * GRID_SIZE;
+              const startY = Math.floor((stageY - padding) / GRID_SIZE) * GRID_SIZE;
+              const endY = Math.ceil((stageY + viewHeight + padding) / GRID_SIZE) * GRID_SIZE;
               const gridDots = [];
               for (let x = startX; x <= endX; x += GRID_SIZE) {
                 for (let y = startY; y <= endY; y += GRID_SIZE) {
                   gridDots.push(
                     <Circle
-                      key={`${x}-${y}`} // ensures a unique key for each dot
+                      key={`${x}-${y}`}
                       x={x}
                       y={y}
                       radius={1 / viewport.scale}
