@@ -5,7 +5,6 @@ import {
   Pencil,
   Square,
   Circle as CircleIcon,
-  Undo,
   Redo,
   RotateCcw,
 } from "lucide-react";

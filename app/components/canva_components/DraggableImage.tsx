@@ -24,7 +24,6 @@ const DraggableImage: React.FC<DraggableImageProps> = ({
   selectedIds,
   onClick,
   onDragEnd,
-  onDelete,
 }) => {
   const [image] = useImage(url);
 
