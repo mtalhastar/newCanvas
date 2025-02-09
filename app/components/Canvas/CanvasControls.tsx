@@ -15,7 +15,7 @@ const CanvasControls: React.FC<CanvasControlsProps> = ({
 
   return (
     <div
-      className="absolute bottom-5 right-5 flex flex-col gap-2 bg-white p-3 rounded-lg shadow-md"
+      className="absolute bottom-5 left-5 flex flex-col gap-2 bg-white p-3 rounded-lg shadow-md"
     >
       <div className="flex gap-1">
         <button

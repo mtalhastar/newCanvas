@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 import {
   MousePointer2,
   Hand,
@@ -7,9 +7,7 @@ import {
   Circle as CircleIcon,
   Undo,
   Redo,
-  ExternalLink,
   RotateCcw,
-  Shapes
 } from "lucide-react";
 
 type ToolType = "select" | "pen" | "rectangle" | "circle" | "hand";
@@ -50,23 +48,29 @@ const Toolbar: React.FC<ToolbarProps> = ({
   canRedo,
 }) => {
   return (
-    <div className="fixed right-5 top-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-lg p-3 flex flex-col gap-4">
+    <div className="fixed right-5 top-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-lg p-3 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
       <div className="flex flex-col gap-4 items-center border-b border-gray-200 pb-4">
-        <button 
+        <button
           onClick={() => setActiveTool("select")}
-          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${activeTool === "select" ? "bg-blue-100 text-blue-600" : ""}`}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${
+            activeTool === "select" ? "bg-blue-100 text-blue-600" : ""
+          }`}
         >
           <MousePointer2 size={20} />
         </button>
-        <button 
+        <button
           onClick={() => setActiveTool("hand")}
-          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${activeTool === "hand" ? "bg-blue-100 text-blue-600" : ""}`}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${
+            activeTool === "hand" ? "bg-blue-100 text-blue-600" : ""
+          }`}
         >
           <Hand size={20} />
         </button>
-        <button 
+        <button
           onClick={() => setActiveTool("pen")}
-          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${activeTool === "pen" ? "bg-blue-100 text-blue-600" : ""}`}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${
+            activeTool === "pen" ? "bg-blue-100 text-blue-600" : ""
+          }`}
         >
           <Pencil size={20} />
         </button>
@@ -78,7 +82,9 @@ const Toolbar: React.FC<ToolbarProps> = ({
             key={color}
             onClick={() => setStrokeColor(color)}
             className={`w-6 h-6 rounded-full transition-transform ${
-              strokeColor === color ? "scale-125 ring-2 ring-offset-2 ring-blue-500" : ""
+              strokeColor === color
+                ? "scale-125 ring-2 ring-offset-2 ring-blue-500"
+                : ""
             }`}
             style={{ backgroundColor: color }}
           />
@@ -90,34 +96,42 @@ const Toolbar: React.FC<ToolbarProps> = ({
           value={strokeWidth}
           onChange={(e) => setStrokeWidth(Number(e.target.value))}
           className="w-6 h-24 -rotate-180"
-          style={{ writingMode: 'vertical-lr' }}
+          style={{ writingMode: "vertical-lr" }}
         />
       </div>
 
       <div className="flex flex-col gap-4 items-center">
-        <button 
+        <button
           onClick={() => setActiveTool("rectangle")}
-          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${activeTool === "rectangle" ? "bg-blue-100 text-blue-600" : ""}`}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${
+            activeTool === "rectangle" ? "bg-blue-100 text-blue-600" : ""
+          }`}
         >
           <Square size={20} />
         </button>
-        <button 
+        <button
           onClick={() => setActiveTool("circle")}
-          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${activeTool === "circle" ? "bg-blue-100 text-blue-600" : ""}`}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${
+            activeTool === "circle" ? "bg-blue-100 text-blue-600" : ""
+          }`}
         >
           <CircleIcon size={20} />
         </button>
-        <button 
-          onClick={onUndo} 
+        <button
+          onClick={onUndo}
           disabled={!canUndo}
-          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${!canUndo ? "opacity-50" : ""}`}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${
+            !canUndo ? "opacity-50" : ""
+          }`}
         >
           <RotateCcw size={20} />
         </button>
-        <button 
-          onClick={onRedo} 
+        <button
+          onClick={onRedo}
           disabled={!canRedo}
-          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${!canRedo ? "opacity-50" : ""}`}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${
+            !canRedo ? "opacity-50" : ""
+          }`}
         >
           <Redo size={20} />
         </button>
@@ -126,4 +140,4 @@ const Toolbar: React.FC<ToolbarProps> = ({
   );
 };
 
-export default Toolbar; 
+export default Toolbar;
