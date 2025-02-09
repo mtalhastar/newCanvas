@@ -722,16 +722,25 @@ const Canva = () => {
   useEffect(() => {
     const container = stageRef.current?.container();
     if (!container) return;
-    container.addEventListener("dragover", (e: Event) => {
+
+    // Use a named function for the event handler to maintain consistency
+    const preventDefault = (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-    });
-    container.addEventListener("drop", handleFileDrop);
-    return () => {
-      container.removeEventListener("dragover", (e: Event) => e.preventDefault());
-      container.removeEventListener("drop", handleFileDrop);
     };
-  }, [handleFileDrop]);
+
+    container.addEventListener("dragover", preventDefault);
+    container.addEventListener("drop", handleDrop);
+    container.addEventListener("dragenter", preventDefault);
+    container.addEventListener("dragleave", preventDefault);
+
+    return () => {
+      container.removeEventListener("dragover", preventDefault);
+      container.removeEventListener("drop", handleDrop);
+      container.removeEventListener("dragenter", preventDefault);
+      container.removeEventListener("dragleave", preventDefault);
+    };
+  }, [handleDrop]);
 
   useEffect(() => {
     setStageDimensions({
@@ -746,24 +755,6 @@ const Canva = () => {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
-
-  useEffect(() => {
-    const container = stageRef.current?.container();
-    if (!container) return;
-    container.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    });
-    container.addEventListener("drop", handleDrop, false);
-    container.addEventListener("dragenter", (e) => e.preventDefault(), false);
-    container.addEventListener("dragleave", (e) => e.preventDefault(), false);
-    return () => {
-      container.removeEventListener("dragover", (e) => e.preventDefault());
-      container.removeEventListener("drop", handleDrop);
-      container.removeEventListener("dragenter", (e) => e.preventDefault());
-      container.removeEventListener("dragleave", (e) => e.preventDefault());
-    };
-  }, [handleDrop]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
