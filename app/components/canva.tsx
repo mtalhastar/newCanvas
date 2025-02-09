@@ -30,7 +30,7 @@ import {
   Presence
 } from "../liveblocks.config";
 import { MutationContext } from "@liveblocks/react";
-import { BaseUserMeta, LiveObject } from "@liveblocks/client";
+import { BaseUserMeta } from "@liveblocks/client";
 
 // Import new components
 import LoadingSpinner from "./ui/LoadingSpinner";
@@ -53,17 +53,6 @@ function throttle(func: Function, limit: number) {
   };
 }
 
-function debounce(func: Function, wait: number) {
-  let timeout: NodeJS.Timeout;
-  return function executedFunction(...args: any[]) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
 
 // -----------------------------------------------------------------------------
 // Constants & Interfaces
@@ -80,7 +69,7 @@ const GRID_COLUMNS = 3;
 const IMAGE_WIDTH = 200;
 const IMAGE_HEIGHT = 200;
 
-const STORAGE_KEY = "canvas_state";
+
 
 interface CanvasState {
   images: CanvasImage[];
@@ -148,7 +137,6 @@ const DraggableImage = ({
   selectedIds,
   onClick,
   onDragEnd,
-  onDelete,
 }: DraggableImageProps) => {
   const [image] = useImage(url);
   return (
