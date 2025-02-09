@@ -19,14 +19,7 @@ import {
 } from "react-konva";
 import type Konva from "konva";
 import { KonvaEventObject } from "konva/lib/Node";
-import {
-  Pointer as TextSelection,
-  PenTool,
-  Square,
-  Circle as CircleIcon,
-  Undo,
-  Redo,
-} from "lucide-react";
+
 import useImage from "use-image";
 import {
   useUpdateMyPresence,
@@ -38,6 +31,12 @@ import {
 } from "../liveblocks.config";
 import { MutationContext } from "@liveblocks/react";
 import { BaseUserMeta, LiveObject } from "@liveblocks/client";
+
+// Import new components
+import LoadingSpinner from "./ui/LoadingSpinner";
+import { default as CanvasControlsComponent } from "./canvas/CanvasControls";
+import Toolbar  from "./canvas/Toolbar";
+
 
 // -----------------------------------------------------------------------------
 // Utility Functions
@@ -86,7 +85,7 @@ const STORAGE_KEY = "canvas_state";
 interface CanvasState {
   images: CanvasImage[];
   shapes: Shape[];
-  lines: any[];
+  lines: Line[];
   viewport: ViewportState;
 }
 
@@ -124,6 +123,14 @@ interface Shape {
   height: number;
   color: string;
   strokeWidth: number;
+}
+
+interface Line {
+  id: string;
+  tool: "pen";
+  points: number[];
+  color: string;
+  width: number;
 }
 
 type ToolType = "select" | "pen" | "rectangle" | "circle";
@@ -175,180 +182,12 @@ const DraggableImage = ({
   );
 };
 
-// -----------------------------------------------------------------------------
-// CanvasControls Component
-// -----------------------------------------------------------------------------
 
-const CanvasControls = ({
-  onZoomIn,
-  onZoomOut,
-  onPan,
-}: {
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onPan: (dx: number, dy: number) => void;
-}) => {
-  const PAN_AMOUNT = 50;
-  return (
-    <div
-      style={{
-        position: "absolute",
-        bottom: "20px",
-        right: "20px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "8px",
-        background: "white",
-        padding: "10px",
-        borderRadius: "4px",
-        boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-      }}
-    >
-      <div style={{ display: "flex", gap: "4px" }}>
-        <button
-          onClick={onZoomIn}
-          style={{ padding: "4px 8px", cursor: "pointer" }}
-        >
-          +
-        </button>
-        <button
-          onClick={onZoomOut}
-          style={{ padding: "4px 8px", cursor: "pointer" }}
-        >
-          -
-        </button>
-      </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr",
-          gap: "4px",
-        }}
-      >
-        <button
-          onClick={() => onPan(PAN_AMOUNT, 0)}
-          style={{ padding: "4px 8px", cursor: "pointer" }}
-        >
-          ←
-        </button>
-        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-          <button
-            onClick={() => onPan(0, PAN_AMOUNT)}
-            style={{ padding: "4px 8px", cursor: "pointer" }}
-          >
-            ↑
-          </button>
-          <button
-            onClick={() => onPan(0, -PAN_AMOUNT)}
-            style={{ padding: "4px 8px", cursor: "pointer" }}
-          >
-            ↓
-          </button>
-        </div>
-        <button
-          onClick={() => onPan(-PAN_AMOUNT, 0)}
-          style={{ padding: "4px 8px", cursor: "pointer" }}
-        >
-          →
-        </button>
-      </div>
-    </div>
-  );
-};
 
 // -----------------------------------------------------------------------------
 // Toolbar Component
 // -----------------------------------------------------------------------------
 
-const Toolbar = ({
-  activeTool,
-  setActiveTool,
-  strokeColor,
-  setStrokeColor,
-  strokeWidth,
-  setStrokeWidth,
-  onUndo,
-  onRedo,
-  canUndo,
-  canRedo,
-}: {
-  activeTool: ToolType;
-  setActiveTool: (tool: ToolType) => void;
-  strokeColor: string;
-  setStrokeColor: (color: string) => void;
-  strokeWidth: number;
-  setStrokeWidth: (width: number) => void;
-  onUndo: () => void;
-  onRedo: () => void;
-  canUndo: boolean;
-  canRedo: boolean;
-}) => {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        bottom: "20px",
-        left: "30%",
-        right: "30%",
-        background: "white",
-        padding: "10px",
-        borderRadius: "4px",
-        boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-        display: "flex",
-        justifyContent: "space-between",
-        gap: "20px",
-      }}
-    >
-      <button onClick={() => setActiveTool("select")}>
-        <TextSelection
-          color={activeTool === "select" ? "blue" : "black"}
-          size={24}
-        />
-      </button>
-      <button onClick={() => setActiveTool("pen")}>
-        <PenTool color={activeTool === "pen" ? "blue" : "black"} size={24} />
-      </button>
-      <button onClick={() => setActiveTool("rectangle")}>
-        <Square
-          color={activeTool === "rectangle" ? "blue" : "black"}
-          size={24}
-        />
-      </button>
-      <button onClick={() => setActiveTool("circle")}>
-        <CircleIcon
-          color={activeTool === "circle" ? "blue" : "black"}
-          size={24}
-        />
-      </button>
-      <input
-        type="color"
-        value={strokeColor}
-        onChange={(e) => setStrokeColor(e.target.value)}
-        style={{
-          width: "32px",
-          height: "32px",
-          border: "none",
-          borderRadius: "50%",
-          cursor: "pointer",
-          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.2)",
-        }}
-      />
-      <input
-        type="range"
-        min="1"
-        max="20"
-        value={strokeWidth}
-        onChange={(e) => setStrokeWidth(Number(e.target.value))}
-      />
-      <button onClick={onUndo} disabled={!canUndo}>
-        <Undo color={canUndo ? "black" : "gray"} size={24} />
-      </button>
-      <button onClick={onRedo} disabled={!canRedo}>
-        <Redo color={canRedo ? "black" : "gray"} size={24} />
-      </button>
-    </div>
-  );
-};
 
 // -----------------------------------------------------------------------------
 // Main Canvas Component
@@ -475,7 +314,12 @@ const Canva = () => {
   }, []);
 
   useEffect(() => {
-    stateRef.current = { images, shapes, lines, viewport };
+    stateRef.current = {
+      images,
+      shapes,
+      lines: lines.map(line => ({ ...line, tool: "pen" })),
+      viewport
+    };
   }, [images, shapes, lines, viewport]);
 
   const addHistoryEntry = (newState: CanvasState) => {
@@ -570,6 +414,7 @@ const Canva = () => {
       if (activeTool === "pen") {
         const newLine = {
           id: `line-${Date.now()}`,
+          tool: "pen",
           points: [stagePos.x, stagePos.y],
           color: strokeColor,
           width: strokeWidth,
@@ -619,6 +464,8 @@ const Canva = () => {
         };
         setSelectionRect(rect);
         const newSelectedIds: string[] = [];
+
+        // Check for images
         images.forEach((img) => {
           const imgRight = img.x + IMAGE_WIDTH;
           const imgBottom = img.y + IMAGE_HEIGHT;
@@ -631,6 +478,8 @@ const Canva = () => {
             newSelectedIds.push(img.id);
           }
         });
+
+        // Check for shapes
         shapes.forEach((shape) => {
           if (shape.type === "rectangle") {
             if (
@@ -653,6 +502,25 @@ const Canva = () => {
             }
           }
         });
+
+        // Check for lines
+        lines.forEach((line) => {
+          // Check if any point of the line is inside the selection rectangle
+          for (let i = 0; i < line.points.length; i += 2) {
+            const pointX = line.points[i];
+            const pointY = line.points[i + 1];
+            if (
+              pointX >= rect.x &&
+              pointX <= rect.x + rect.width &&
+              pointY >= rect.y &&
+              pointY <= rect.y + rect.height
+            ) {
+              newSelectedIds.push(line.id);
+              break; // Break once we know the line is selected
+            }
+          }
+        });
+
         if (e.evt.shiftKey) {
           setSelectedIds((prev) =>
             Array.from(new Set([...prev, ...newSelectedIds]))
@@ -674,6 +542,7 @@ const Canva = () => {
           const lastLine = lines[lines.length - 1];
           const updatedLine = {
             ...lastLine,
+            tool: "pen",
             points: lastLine.points.concat([stagePos.x, stagePos.y]),
           };
           updateLines([...lines.slice(0, -1), updatedLine]);
@@ -794,9 +663,9 @@ const Canva = () => {
 
   const handleDelete = useCallback(() => {
     if (selectedIds.length > 0) {
-      const newImages = images.filter((img: Storage["images"][0]) => !selectedIds.includes(img.id));
-      const newShapes = shapes.filter((shape: Storage["shapes"][0]) => !selectedIds.includes(shape.id));
-      const newLines = lines.filter((line: Storage["lines"][0]) => !selectedIds.includes(line.id));
+      const newImages = images.filter((img) => !selectedIds.includes(img.id));
+      const newShapes = shapes.filter((shape) => !selectedIds.includes(shape.id));
+      const newLines = lines.filter((line) => !selectedIds.includes(line.id));
       
       updateImages(newImages);
       updateShapes(newShapes);
@@ -940,7 +809,7 @@ const Canva = () => {
       const state = history[newIndex];
       updateImages(state.images);
       updateShapes(state.shapes);
-      updateLines(state.lines);
+      updateLines(state.lines.map(line => ({ ...line, tool: "pen" })));
       updateViewport(state.viewport);
       setCurrentIndex(newIndex);
     }
@@ -952,7 +821,7 @@ const Canva = () => {
       const state = history[newIndex];
       updateImages(state.images);
       updateShapes(state.shapes);
-      updateLines(state.lines);
+      updateLines(state.lines.map(line => ({ ...line, tool: "pen" })));
       updateViewport(state.viewport);
       setCurrentIndex(newIndex);
     }
@@ -962,21 +831,18 @@ const Canva = () => {
   // Render
   // ---------------------------------------------------------------------------
   if (isStorageLoading) {
-    return (
-      <div style={{ 
-        width: "100vw", 
-        height: "100vh", 
-        display: "flex", 
-        alignItems: "center", 
-        justifyContent: "center" 
-      }}>
-        Loading canvas...
-      </div>
-    );
+    return <LoadingSpinner />;
   }
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ 
+      position: "relative", 
+      width: "100vw", 
+      height: "100vh", 
+      overflow: "hidden",
+      margin: 0,
+      padding: 0
+    }}>
       <Stage
         ref={stageRef}
         width={stageDimensions.width}
@@ -1104,36 +970,51 @@ const Canva = () => {
         </Layer>
 
         <Layer>
-          {lines.map((line) => (
-            <Line
-              key={line.id}
-              points={line.points}
-              stroke={line.color}
-              strokeWidth={line.width}
-              tension={0.5}
-              lineCap="round"
-              perfectDrawEnabled={false}
-              // Increase hit area further
-              hitStrokeWidth={Math.max(line.width + 20, 20)}
-              onClick={(e) => {
-                e.evt.stopPropagation();
-                if (e.evt.shiftKey) {
-                  setSelectedIds((prev) =>
-                    prev.includes(line.id)
-                      ? prev.filter((id) => id !== line.id)
-                      : [...prev, line.id]
-                  );
-                } else {
-                  setSelectedIds([line.id]);
-                }
-              }}
-              onTap={(e) => {
-                // Mirror onClick for touch events
-                e.evt.stopPropagation();
-                setSelectedIds([line.id]);
-              }}
-            />
-          ))}
+          {lines.map((line) => {
+            const isSelected = selectedIds.includes(line.id);
+            return (
+              <Line
+                key={line.id}
+                id={line.id}
+                points={line.points}
+                stroke={isSelected ? "#0096FF" : line.color}
+                strokeWidth={line.width}
+                tension={0.5}
+                lineCap="round"
+                perfectDrawEnabled={false}
+                hitStrokeWidth={Math.max(line.width + 20, 20)}
+                draggable={selectedIds.length <= 1}
+                onClick={(e) => {
+                  e.evt.stopPropagation();
+                  if (e.evt.shiftKey) {
+                    setSelectedIds((prev) =>
+                      prev.includes(line.id)
+                        ? prev.filter((id) => id !== line.id)
+                        : [...prev, line.id]
+                    );
+                  } else {
+                    setSelectedIds([line.id]);
+                  }
+                }}
+                onDragMove={(e) => {
+                  const newPoints = line.points.map((point, i) => {
+                    if (i % 2 === 0) return point + e.target.x();
+                    return point + e.target.y();
+                  });
+                  const updatedLine = { ...line, points: newPoints };
+                  updateLines(lines.map(l => l.id === line.id ? updatedLine : l));
+                  e.target.position({ x: 0, y: 0 }); // Reset position after updating points
+                }}
+                onDragEnd={() => {
+                  addHistoryEntry(stateRef.current);
+                }}
+                shadowEnabled={isSelected}
+                shadowColor="#0096FF"
+                shadowBlur={10}
+                shadowOpacity={0.5}
+              />
+            );
+          })}
           {shapes.map((shape) => {
             const isSelected = selectedIds.includes(shape.id);
             if (shape.type === "rectangle") {
@@ -1146,15 +1027,30 @@ const Canva = () => {
                     height={shape.height}
                     stroke={shape.color}
                     strokeWidth={shape.strokeWidth}
+                    draggable={selectedIds.length <= 1}
                     onClick={(e) => {
-                      if (!e.evt.shiftKey) setSelectedIds([]);
-                      setSelectedIds((prev) => [...prev, shape.id]);
+                      e.evt.stopPropagation();
+                      if (e.evt.shiftKey) {
+                        setSelectedIds((prev) =>
+                          prev.includes(shape.id)
+                            ? prev.filter((id) => id !== shape.id)
+                            : [...prev, shape.id]
+                        );
+                      } else {
+                        setSelectedIds([shape.id]);
+                      }
+                    }}
+                    onDragMove={(e) => {
+                      const updatedShape = { ...shape, x: e.target.x(), y: e.target.y() };
+                      updateShapes(shapes.map(s => s.id === shape.id ? updatedShape : s));
+                    }}
+                    onDragEnd={() => {
+                      addHistoryEntry(stateRef.current);
                     }}
                     perfectDrawEnabled={false}
                   />
                   {isSelected && (
                     <Rect
-                      // Adding a key to the conditional element
                       key={`${shape.id}-overlay`}
                       x={shape.x - 2}
                       y={shape.y - 2}
@@ -1177,15 +1073,30 @@ const Canva = () => {
                   radius={Math.abs(shape.width)}
                   stroke={shape.color}
                   strokeWidth={shape.strokeWidth}
+                  draggable={selectedIds.length <= 1}
                   onClick={(e) => {
-                    if (!e.evt.shiftKey) setSelectedIds([]);
-                    setSelectedIds((prev) => [...prev, shape.id]);
+                    e.evt.stopPropagation();
+                    if (e.evt.shiftKey) {
+                      setSelectedIds((prev) =>
+                        prev.includes(shape.id)
+                          ? prev.filter((id) => id !== shape.id)
+                          : [...prev, shape.id]
+                      );
+                    } else {
+                      setSelectedIds([shape.id]);
+                    }
+                  }}
+                  onDragMove={(e) => {
+                    const updatedShape = { ...shape, x: e.target.x(), y: e.target.y() };
+                    updateShapes(shapes.map(s => s.id === shape.id ? updatedShape : s));
+                  }}
+                  onDragEnd={() => {
+                    addHistoryEntry(stateRef.current);
                   }}
                   perfectDrawEnabled={false}
                 />
                 {isSelected && (
                   <Circle
-                    // Adding a key to the conditional element
                     key={`${shape.id}-overlay`}
                     x={shape.x}
                     y={shape.y}
@@ -1233,7 +1144,7 @@ const Canva = () => {
         </Layer>
       </Stage>
 
-      <CanvasControls
+      <CanvasControlsComponent
         onZoomIn={() => {
           const newScale = Math.min(viewport.scale * 1.06, MAX_SCALE);
           updateViewport({ ...viewport, scale: newScale });
