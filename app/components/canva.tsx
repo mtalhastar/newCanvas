@@ -42,7 +42,7 @@ import Toolbar  from "./canva_components/Toolbar";
 // Utility Functions
 // -----------------------------------------------------------------------------
 
-function throttle(func: Function, limit: number) {
+function throttle(func: (...args: any[]) => void, limit: number) {
   let inThrottle: boolean;
   return function (...args: any[]) {
     if (!inThrottle) {
@@ -224,9 +224,14 @@ const Canva = () => {
   // Liveblocks state
   const storage = useStorage((root) => root) as Storage | null;
   const isStorageLoading = storage === null;
-  const shapes = (storage?.shapes ?? []) as Storage["shapes"];
-  const images = (storage?.images ?? []) as Storage["images"];
-  const lines = (storage?.lines ?? []) as Storage["lines"];
+
+  const memoizedStorage = useMemo(() => ({
+    shapes: (storage?.shapes ?? []) as Storage["shapes"],
+    images: (storage?.images ?? []) as Storage["images"],
+    lines: (storage?.lines ?? []) as Storage["lines"]
+  }), [storage]);
+
+  const { shapes, images, lines } = memoizedStorage;
   
   // Create mutations for updating storage
   const updateShapes = useMutation((
@@ -268,8 +273,9 @@ const Canva = () => {
   // ---------------------------------------------------------------------------
   const groupBBox = useMemo(() => {
     if (selectedIds.length < 2) return null;
-    let xs: number[] = [];
-    let ys: number[] = [];
+    const xs: number[] = [];
+    const ys: number[] = [];
+    
     images.forEach((img) => {
       if (selectedIds.includes(img.id)) {
         xs.push(img.x);
@@ -278,6 +284,7 @@ const Canva = () => {
         ys.push(img.y + IMAGE_HEIGHT);
       }
     });
+    
     shapes.forEach((shape) => {
       if (selectedIds.includes(shape.id)) {
         xs.push(shape.x);
@@ -286,6 +293,7 @@ const Canva = () => {
         ys.push(shape.y + shape.height);
       }
     });
+    
     if (xs.length === 0 || ys.length === 0) return null;
     const minX = Math.min(...xs);
     const minY = Math.min(...ys);
@@ -299,7 +307,7 @@ const Canva = () => {
   // ---------------------------------------------------------------------------
   const updateViewport = useCallback((newViewport: ViewportState) => {
     throttledUpdateViewport(newViewport);
-  }, []);
+  }, [throttledUpdateViewport]);
 
   useEffect(() => {
     stateRef.current = {
@@ -310,13 +318,13 @@ const Canva = () => {
     };
   }, [images, shapes, lines, viewport]);
 
-  const addHistoryEntry = (newState: CanvasState) => {
+  const addHistoryEntry = useCallback((newState: CanvasState) => {
     setHistory((prevHistory) => {
       const newHistory = [...prevHistory.slice(0, currentIndex + 1), newState];
       return newHistory;
     });
     setCurrentIndex((prevIndex) => prevIndex + 1);
-  };
+  }, [currentIndex]);
 
   // ---------------------------------------------------------------------------
   // Smooth Zoom (using exponential zoom factor)
@@ -425,128 +433,135 @@ const Canva = () => {
     [activeTool, lines, shapes, strokeColor, strokeWidth, updateLines, updateShapes]
   );
 
-  const handleMouseMove = useCallback(
-    (e: KonvaEventObject<MouseEvent>) => {
-      const stage = e.target.getStage();
-      if (!stage) return;
+  const handleMouseMove = useCallback((e: KonvaEventObject<MouseEvent>) => {
+    const stage = e.target.getStage();
+    if (!stage) return;
 
+    const pos = stage.getPointerPosition();
+    if (pos) {
+      const stagePos = {
+        x: (pos.x - stage.x()) / stage.scaleX(),
+        y: (pos.y - stage.y()) / stage.scaleY(),
+      };
+      updateMyPresence({ cursor: stagePos });
+    }
+
+    if (isSelecting && selectionStart.current) {
       const pos = stage.getPointerPosition();
-      if (pos) {
-        const stagePos = {
-          x: (pos.x - stage.x()) / stage.scaleX(),
-          y: (pos.y - stage.y()) / stage.scaleY(),
-        };
-        updateMyPresence({ cursor: stagePos });
-      }
+      if (!pos) return;
+      const stageX = (pos.x - stage.x()) / stage.scaleX();
+      const stageY = (pos.y - stage.y()) / stage.scaleY();
+      const rect = {
+        x: Math.min(selectionStart.current.x, stageX),
+        y: Math.min(selectionStart.current.y, stageY),
+        width: Math.abs(stageX - selectionStart.current.x),
+        height: Math.abs(stageY - selectionStart.current.y),
+      };
+      setSelectionRect(rect);
+      const newSelectedIds: string[] = [];
 
-      if (isSelecting && selectionStart.current) {
-        const pos = stage.getPointerPosition();
-        if (!pos) return;
-        const stageX = (pos.x - stage.x()) / stage.scaleX();
-        const stageY = (pos.y - stage.y()) / stage.scaleY();
-        const rect = {
-          x: Math.min(selectionStart.current.x, stageX),
-          y: Math.min(selectionStart.current.y, stageY),
-          width: Math.abs(stageX - selectionStart.current.x),
-          height: Math.abs(stageY - selectionStart.current.y),
-        };
-        setSelectionRect(rect);
-        const newSelectedIds: string[] = [];
+      // Check for images
+      images.forEach((img) => {
+        const imgRight = img.x + IMAGE_WIDTH;
+        const imgBottom = img.y + IMAGE_HEIGHT;
+        if (
+          rect.x < imgRight &&
+          rect.x + rect.width > img.x &&
+          rect.y < imgBottom &&
+          rect.y + rect.height > img.y
+        ) {
+          newSelectedIds.push(img.id);
+        }
+      });
 
-        // Check for images
-        images.forEach((img) => {
-          const imgRight = img.x + IMAGE_WIDTH;
-          const imgBottom = img.y + IMAGE_HEIGHT;
+      // Check for shapes
+      shapes.forEach((shape) => {
+        if (shape.type === "rectangle") {
           if (
-            rect.x < imgRight &&
-            rect.x + rect.width > img.x &&
-            rect.y < imgBottom &&
-            rect.y + rect.height > img.y
+            rect.x < shape.x + shape.width &&
+            rect.x + rect.width > shape.x &&
+            rect.y < shape.y + shape.height &&
+            rect.y + rect.height > shape.y
           ) {
-            newSelectedIds.push(img.id);
+            newSelectedIds.push(shape.id);
           }
-        });
-
-        // Check for shapes
-        shapes.forEach((shape) => {
-          if (shape.type === "rectangle") {
-            if (
-              rect.x < shape.x + shape.width &&
-              rect.x + rect.width > shape.x &&
-              rect.y < shape.y + shape.height &&
-              rect.y + rect.height > shape.y
-            ) {
-              newSelectedIds.push(shape.id);
-            }
-          } else {
-            const radius = Math.abs(shape.width);
-            if (
-              rect.x < shape.x + radius &&
-              rect.x + rect.width > shape.x - radius &&
-              rect.y < shape.y + radius &&
-              rect.y + rect.height > shape.y - radius
-            ) {
-              newSelectedIds.push(shape.id);
-            }
-          }
-        });
-
-        // Check for lines
-        lines.forEach((line) => {
-          // Check if any point of the line is inside the selection rectangle
-          for (let i = 0; i < line.points.length; i += 2) {
-            const pointX = line.points[i];
-            const pointY = line.points[i + 1];
-            if (
-              pointX >= rect.x &&
-              pointX <= rect.x + rect.width &&
-              pointY >= rect.y &&
-              pointY <= rect.y + rect.height
-            ) {
-              newSelectedIds.push(line.id);
-              break; // Break once we know the line is selected
-            }
-          }
-        });
-
-        if (e.evt.shiftKey) {
-          setSelectedIds((prev) =>
-            Array.from(new Set([...prev, ...newSelectedIds]))
-          );
         } else {
-          setSelectedIds(newSelectedIds);
+          const radius = Math.abs(shape.width);
+          if (
+            rect.x < shape.x + radius &&
+            rect.x + rect.width > shape.x - radius &&
+            rect.y < shape.y + radius &&
+            rect.y + rect.height > shape.y - radius
+          ) {
+            newSelectedIds.push(shape.id);
+          }
         }
-        return;
-      }
+      });
 
-      if (isDrawing.current) {
-        const pos = stage.getPointerPosition();
-        if (!pos) return;
-        const stagePos = {
-          x: (pos.x - stage.x()) / stage.scaleX(),
-          y: (pos.y - stage.y()) / stage.scaleY(),
-        };
-        if (activeTool === "pen") {
-          const lastLine = lines[lines.length - 1];
-          const updatedLine = {
-            ...lastLine,
-            tool: "pen",
-            points: lastLine.points.concat([stagePos.x, stagePos.y]),
-          };
-          updateLines([...lines.slice(0, -1), updatedLine]);
-        } else if (activeTool === "rectangle" || activeTool === "circle") {
-          const lastShape = shapes[shapes.length - 1];
-          const updatedShape = {
-            ...lastShape,
-            width: stagePos.x - lastShape.x,
-            height: stagePos.y - lastShape.y,
-          };
-          updateShapes([...shapes.slice(0, -1), updatedShape]);
+      // Check for lines
+      lines.forEach((line) => {
+        for (let i = 0; i < line.points.length; i += 2) {
+          const pointX = line.points[i];
+          const pointY = line.points[i + 1];
+          if (
+            pointX >= rect.x &&
+            pointX <= rect.x + rect.width &&
+            pointY >= rect.y &&
+            pointY <= rect.y + rect.height
+          ) {
+            newSelectedIds.push(line.id);
+            break;
+          }
         }
+      });
+
+      if (e.evt.shiftKey) {
+        setSelectedIds((prev) =>
+          Array.from(new Set([...prev, ...newSelectedIds]))
+        );
+      } else {
+        setSelectedIds(newSelectedIds);
       }
-    },
-    [activeTool, isSelecting, lines, shapes, updateLines, updateShapes]
-  );
+      return;
+    }
+
+    if (isDrawing.current) {
+      const pos = stage.getPointerPosition();
+      if (!pos) return;
+      const stagePos = {
+        x: (pos.x - stage.x()) / stage.scaleX(),
+        y: (pos.y - stage.y()) / stage.scaleY(),
+      };
+      if (activeTool === "pen") {
+        const lastLine = lines[lines.length - 1];
+        const updatedLine = {
+          ...lastLine,
+          tool: "pen",
+          points: lastLine.points.concat([stagePos.x, stagePos.y]),
+        };
+        updateLines([...lines.slice(0, -1), updatedLine]);
+      } else if (activeTool === "rectangle" || activeTool === "circle") {
+        const lastShape = shapes[shapes.length - 1];
+        const updatedShape = {
+          ...lastShape,
+          width: stagePos.x - lastShape.x,
+          height: stagePos.y - lastShape.y,
+        };
+        updateShapes([...shapes.slice(0, -1), updatedShape]);
+      }
+    }
+  }, [
+    activeTool,
+    isSelecting,
+    lines,
+    shapes,
+    images,
+    updateLines,
+    updateShapes,
+    updateMyPresence,
+    setSelectedIds,
+    setSelectionRect
+  ]);
 
   const handleMouseUp = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
@@ -608,7 +623,7 @@ const Canva = () => {
 
   const handleGroupDragEnd = useCallback(() => {
     addHistoryEntry(stateRef.current);
-  }, []);
+  }, [addHistoryEntry]);
 
   // ---------------------------------------------------------------------------
   // File Drop & Resize Handlers
@@ -643,7 +658,7 @@ const Canva = () => {
 
   const handleImageDelete = useCallback(() => {
     if (selectedId) {
-      const newImages = images.filter((img: Storage["images"][0]) => img.id !== selectedId);
+      const newImages = images.filter((img) => img.id !== selectedId);
       updateImages(newImages);
       setSelectedId(null);
     }
@@ -659,8 +674,9 @@ const Canva = () => {
       updateShapes(newShapes);
       updateLines(newLines);
       setSelectedIds([]);
+      addHistoryEntry(stateRef.current);
     }
-  }, [selectedIds, images, shapes, lines, updateImages, updateShapes, updateLines]);
+  }, [selectedIds, images, shapes, lines, updateImages, updateShapes, updateLines, addHistoryEntry]);
 
   const handleImageDragEnd = useCallback(
     (id: string, newX: number, newY: number) => {
@@ -777,13 +793,12 @@ const Canva = () => {
         // Only initialize with default images if it's a new room
         const initialImages = imageUrls.map((url, index) => ({
           id: `image-${index}`,
-          url,  // These are network URLs, so they'll work across sessions
+          url,
           x: (index % GRID_COLUMNS) * (IMAGE_WIDTH + IMAGE_GAP) + IMAGE_GAP,
           y: Math.floor(index / GRID_COLUMNS) * (IMAGE_HEIGHT + IMAGE_GAP) + IMAGE_GAP,
         }));
         
         try {
-          // Initialize storage using mutations
           await Promise.all([
             updateImages(initialImages),
             updateShapes([]),
@@ -794,7 +809,6 @@ const Canva = () => {
           console.error('Failed to initialize storage:', error);
         }
       } else {
-        // Room exists but arrays might be undefined, ensure they're initialized
         if (!storage.images) updateImages([]);
         if (!storage.shapes) updateShapes([]);
         if (!storage.lines) updateLines([]);
@@ -803,7 +817,7 @@ const Canva = () => {
     };
 
     initializeStorage();
-  }, [storage, isStorageLoading, updateImages, updateShapes, updateLines]);
+  }, [storage, isStorageLoading, updateImages, updateShapes, updateLines, imageUrls]);
 
   const canUndo = currentIndex > 0;
   const canRedo = currentIndex < history.length - 1;

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   MousePointer2,
   Hand,
@@ -7,6 +7,9 @@ import {
   Circle as CircleIcon,
   Redo,
   RotateCcw,
+  Palette,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 type ToolType = "select" | "pen" | "rectangle" | "circle" | "hand";
@@ -46,8 +49,10 @@ const Toolbar: React.FC<ToolbarProps> = ({
   canUndo,
   canRedo,
 }) => {
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
+
   return (
-    <div className="fixed right-5 top-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-lg p-3 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+    <div className="fixed right-5 top-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-lg p-3 flex flex-col gap-4">
       <div className="flex flex-col gap-4 items-center border-b border-gray-200 pb-4">
         <button
           onClick={() => setActiveTool("select")}
@@ -76,18 +81,39 @@ const Toolbar: React.FC<ToolbarProps> = ({
       </div>
 
       <div className="flex flex-col gap-3 items-center border-b border-gray-200 pb-4">
-        {COLORS.map((color) => (
+        <div className="relative">
           <button
-            key={color}
-            onClick={() => setStrokeColor(color)}
-            className={`w-6 h-6 rounded-full transition-transform ${
-              strokeColor === color
-                ? "scale-125 ring-2 ring-offset-2 ring-blue-500"
-                : ""
-            }`}
-            style={{ backgroundColor: color }}
-          />
-        ))}
+            onClick={() => setIsColorPickerOpen(!isColorPickerOpen)}
+            className="flex items-center gap-1 p-2 rounded-lg hover:bg-gray-100 transition-colors"
+          >
+            <div
+              className="w-5 h-5 rounded-full border border-gray-200"
+              style={{ backgroundColor: strokeColor }}
+            />
+            {isColorPickerOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+          
+          {isColorPickerOpen && (
+            <div className="absolute right-full mr-2 bg-white rounded-lg shadow-lg p-2 flex flex-col gap-2">
+              {COLORS.map((color) => (
+                <button
+                  key={color}
+                  onClick={() => {
+                    setStrokeColor(color);
+                    setIsColorPickerOpen(false);
+                  }}
+                  className={`w-6 h-6 rounded-full transition-transform ${
+                    strokeColor === color
+                      ? "scale-125 ring-2 ring-offset-2 ring-blue-500"
+                      : ""
+                  }`}
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        
         <input
           type="range"
           min="1"
