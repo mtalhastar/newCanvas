@@ -1,14 +1,18 @@
 import React from 'react';
 import {
-  Pointer as TextSelection,
-  PenTool,
+  MousePointer2,
+  Hand,
+  Pencil,
   Square,
   Circle as CircleIcon,
   Undo,
   Redo,
+  ExternalLink,
+  RotateCcw,
+  Shapes
 } from "lucide-react";
 
-type ToolType = "select" | "pen" | "rectangle" | "circle";
+type ToolType = "select" | "pen" | "rectangle" | "circle" | "hand";
 
 interface ToolbarProps {
   activeTool: ToolType;
@@ -23,6 +27,16 @@ interface ToolbarProps {
   canRedo: boolean;
 }
 
+const COLORS = [
+  "#7C3AED", // Purple
+  "#60A5FA", // Blue
+  "#34D399", // Green
+  "#FBBF24", // Yellow
+  "#FB923C", // Orange
+  "#F87171", // Red
+  "#000000", // Black
+];
+
 const Toolbar: React.FC<ToolbarProps> = ({
   activeTool,
   setActiveTool,
@@ -36,50 +50,78 @@ const Toolbar: React.FC<ToolbarProps> = ({
   canRedo,
 }) => {
   return (
-    <div
-      className="absolute bottom-5 left-[30%] right-[30%] bg-white p-3 rounded-lg shadow-md flex justify-between items-center gap-5"
-    >
-      <button onClick={() => setActiveTool("select")}>
-        <TextSelection
-          color={activeTool === "select" ? "blue" : "black"}
-          size={24}
+    <div className="fixed right-5 top-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-lg p-3 flex flex-col gap-4">
+      <div className="flex flex-col gap-4 items-center border-b border-gray-200 pb-4">
+        <button 
+          onClick={() => setActiveTool("select")}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${activeTool === "select" ? "bg-blue-100 text-blue-600" : ""}`}
+        >
+          <MousePointer2 size={20} />
+        </button>
+        <button 
+          onClick={() => setActiveTool("hand")}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${activeTool === "hand" ? "bg-blue-100 text-blue-600" : ""}`}
+        >
+          <Hand size={20} />
+        </button>
+        <button 
+          onClick={() => setActiveTool("pen")}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${activeTool === "pen" ? "bg-blue-100 text-blue-600" : ""}`}
+        >
+          <Pencil size={20} />
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-3 items-center border-b border-gray-200 pb-4">
+        {COLORS.map((color) => (
+          <button
+            key={color}
+            onClick={() => setStrokeColor(color)}
+            className={`w-6 h-6 rounded-full transition-transform ${
+              strokeColor === color ? "scale-125 ring-2 ring-offset-2 ring-blue-500" : ""
+            }`}
+            style={{ backgroundColor: color }}
+          />
+        ))}
+        <input
+          type="range"
+          min="1"
+          max="20"
+          value={strokeWidth}
+          onChange={(e) => setStrokeWidth(Number(e.target.value))}
+          className="w-6 h-24 -rotate-180"
+          style={{ writingMode: 'vertical-lr' }}
         />
-      </button>
-      <button onClick={() => setActiveTool("pen")}>
-        <PenTool color={activeTool === "pen" ? "blue" : "black"} size={24} />
-      </button>
-      <button onClick={() => setActiveTool("rectangle")}>
-        <Square
-          color={activeTool === "rectangle" ? "blue" : "black"}
-          size={24}
-        />
-      </button>
-      <button onClick={() => setActiveTool("circle")}>
-        <CircleIcon
-          color={activeTool === "circle" ? "blue" : "black"}
-          size={24}
-        />
-      </button>
-      <input
-        type="color"
-        value={strokeColor}
-        onChange={(e) => setStrokeColor(e.target.value)}
-        className="w-8 h-8 border-none rounded-full cursor-pointer shadow-md"
-      />
-      <input
-        type="range"
-        min="1"
-        max="20"
-        value={strokeWidth}
-        onChange={(e) => setStrokeWidth(Number(e.target.value))}
-        className="w-24"
-      />
-      <button onClick={onUndo} disabled={!canUndo}>
-        <Undo color={canUndo ? "black" : "gray"} size={24} />
-      </button>
-      <button onClick={onRedo} disabled={!canRedo}>
-        <Redo color={canRedo ? "black" : "gray"} size={24} />
-      </button>
+      </div>
+
+      <div className="flex flex-col gap-4 items-center">
+        <button 
+          onClick={() => setActiveTool("rectangle")}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${activeTool === "rectangle" ? "bg-blue-100 text-blue-600" : ""}`}
+        >
+          <Square size={20} />
+        </button>
+        <button 
+          onClick={() => setActiveTool("circle")}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${activeTool === "circle" ? "bg-blue-100 text-blue-600" : ""}`}
+        >
+          <CircleIcon size={20} />
+        </button>
+        <button 
+          onClick={onUndo} 
+          disabled={!canUndo}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${!canUndo ? "opacity-50" : ""}`}
+        >
+          <RotateCcw size={20} />
+        </button>
+        <button 
+          onClick={onRedo} 
+          disabled={!canRedo}
+          className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${!canRedo ? "opacity-50" : ""}`}
+        >
+          <Redo size={20} />
+        </button>
+      </div>
     </div>
   );
 };

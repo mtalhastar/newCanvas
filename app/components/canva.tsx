@@ -133,7 +133,7 @@ interface Line {
   width: number;
 }
 
-type ToolType = "select" | "pen" | "rectangle" | "circle";
+type ToolType = "select" | "pen" | "rectangle" | "circle" | "hand";
 
 // -----------------------------------------------------------------------------
 // DraggableImage Component
@@ -865,7 +865,7 @@ const Canva = () => {
         width={stageDimensions.width}
         height={stageDimensions.height}
         draggable={
-          activeTool === "select" && selectedIds.length === 0 && !isSelecting
+          activeTool === "hand" || (activeTool === "select" && selectedIds.length === 0 && !isSelecting)
         }
         onWheel={handleWheel}
         x={viewport.x}
