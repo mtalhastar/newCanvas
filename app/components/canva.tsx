@@ -698,14 +698,19 @@ const Canva = () => {
     const files = Array.from(e.dataTransfer?.files || []);
     files.forEach((file) => {
       if (file.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
-        const objectUrl = URL.createObjectURL(file);
-        const newImage = {
-          id: `image-${Date.now()}`,
-          url: objectUrl,
-          x: stagePos.x,
-          y: stagePos.y,
+        // Convert the file to base64
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const base64Url = e.target?.result as string;
+          const newImage = {
+            id: `image-${Date.now()}`,
+            url: base64Url,
+            x: stagePos.x,
+            y: stagePos.y,
+          };
+          updateImages([...images, newImage]);
         };
-        updateImages([...images, newImage]);
+        reader.readAsDataURL(file);
       }
     });
   }, [images, updateImages]);
@@ -775,11 +780,16 @@ const Canva = () => {
   // Move initial data loading to a separate effect that runs only when storage is ready
   useEffect(() => {
     const initializeStorage = async () => {
-      // Only initialize if storage is ready and no images exist yet
-      if (storage && !isStorageLoading && images.length === 0) {
+      if (!storage || isStorageLoading) return;
+
+      // Check if the room is completely new (no storage initialized)
+      const isNewRoom = !storage.images && !storage.shapes && !storage.lines;
+      
+      if (isNewRoom) {
+        // Only initialize with default images if it's a new room
         const initialImages = imageUrls.map((url, index) => ({
           id: `image-${index}`,
-          url,
+          url,  // These are network URLs, so they'll work across sessions
           x: (index % GRID_COLUMNS) * (IMAGE_WIDTH + IMAGE_GAP) + IMAGE_GAP,
           y: Math.floor(index / GRID_COLUMNS) * (IMAGE_HEIGHT + IMAGE_GAP) + IMAGE_GAP,
         }));
@@ -791,14 +801,21 @@ const Canva = () => {
             updateShapes([]),
             updateLines([])
           ]);
+          console.log('Initialized new room with default state');
         } catch (error) {
           console.error('Failed to initialize storage:', error);
         }
+      } else {
+        // Room exists but arrays might be undefined, ensure they're initialized
+        if (!storage.images) updateImages([]);
+        if (!storage.shapes) updateShapes([]);
+        if (!storage.lines) updateLines([]);
+        console.log('Room already has state, using existing data');
       }
     };
 
     initializeStorage();
-  }, [storage, isStorageLoading, images.length, updateImages, updateShapes, updateLines]);
+  }, [storage, isStorageLoading, updateImages, updateShapes, updateLines]);
 
   const canUndo = currentIndex > 0;
   const canRedo = currentIndex < history.length - 1;
