@@ -564,7 +564,7 @@ const Canva = () => {
   ]);
 
   const handleMouseUp = useCallback(
-    (e: KonvaEventObject<MouseEvent>) => {
+    () => {
       const stage = stageRef.current;
       if (!stage) return;
 
@@ -639,21 +639,25 @@ const Canva = () => {
       x: (pos.x - stage.x()) / stage.scaleX(),
       y: (pos.y - stage.y()) / stage.scaleY(),
     };
-    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
-      const files = Array.from(e.dataTransfer.files);
-      files.forEach((file) => {
-        if (file.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
-          const objectUrl = URL.createObjectURL(file);
-          const newImage: Storage["images"][0] = {
+    
+    const files = Array.from(e.dataTransfer?.files || []);
+    files.forEach((file) => {
+      if (file.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
+        // Convert the file to base64
+        const reader = new FileReader();
+        reader.onload = (readerEvent) => {
+          const base64Url = readerEvent.target?.result as string;
+          const newImage = {
             id: `image-${Date.now()}`,
-            url: objectUrl,
+            url: base64Url,
             x: stagePos.x,
             y: stagePos.y,
           };
           updateImages([...images, newImage]);
-        }
-      });
-    }
+        };
+        reader.readAsDataURL(file);
+      }
+    });
   }, [images, updateImages]);
 
   const handleImageDelete = useCallback(() => {
@@ -687,37 +691,6 @@ const Canva = () => {
     },
     [images, updateImages]
   );
-
-  const handleFileDrop = useCallback((e: DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const stage = stageRef.current;
-    if (!stage) return;
-    const pos = stage.getPointerPosition();
-    if (!pos) return;
-    const stagePos = {
-      x: (pos.x - stage.x()) / stage.scaleX(),
-      y: (pos.y - stage.y()) / stage.scaleY(),
-    };
-    const files = Array.from(e.dataTransfer?.files || []);
-    files.forEach((file) => {
-      if (file.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
-        // Convert the file to base64
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const base64Url = e.target?.result as string;
-          const newImage = {
-            id: `image-${Date.now()}`,
-            url: base64Url,
-            x: stagePos.x,
-            y: stagePos.y,
-          };
-          updateImages([...images, newImage]);
-        };
-        reader.readAsDataURL(file);
-      }
-    });
-  }, [images, updateImages]);
 
   useEffect(() => {
     const container = stageRef.current?.container();
