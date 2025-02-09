@@ -34,8 +34,8 @@ import { BaseUserMeta, LiveObject } from "@liveblocks/client";
 
 // Import new components
 import LoadingSpinner from "./ui/LoadingSpinner";
-import { default as CanvasControlsComponent } from "./canvas/CanvasControls";
-import Toolbar  from "./canvas/Toolbar";
+import { default as CanvasControlsComponent } from "./canva_components/CanvasControls";
+import Toolbar  from "./canva_components/Toolbar";
 
 
 // -----------------------------------------------------------------------------
