@@ -42,9 +42,9 @@ import Toolbar  from "./canva_components/Toolbar";
 // Utility Functions
 // -----------------------------------------------------------------------------
 
-function throttle(func: (...args: any[]) => void, limit: number) {
+function throttle<T extends unknown[]>(func: (...args: T) => void, limit: number) {
   let inThrottle: boolean;
-  return function (...args: any[]) {
+  return function (...args: T) {
     if (!inThrottle) {
       func(...args);
       inThrottle = true;
@@ -722,13 +722,13 @@ const Canva = () => {
   useEffect(() => {
     const container = stageRef.current?.container();
     if (!container) return;
-    container.addEventListener("dragover", (e) => {
+    container.addEventListener("dragover", (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
     });
     container.addEventListener("drop", handleFileDrop);
     return () => {
-      container.removeEventListener("dragover", (e) => e.preventDefault());
+      container.removeEventListener("dragover", (e: Event) => e.preventDefault());
       container.removeEventListener("drop", handleFileDrop);
     };
   }, [handleFileDrop]);
@@ -775,11 +775,11 @@ const Canva = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleDelete]);
 
-  const imageUrls = [
+  const imageUrls = useMemo(() => [
     "https://xfigurabucket.s3.us-east-1.amazonaws.com/_a_hyper_realistic_rendering_of_an_organically_shaped_house_with_a_curved_marble_exterior__set_against_a_white_background__in_the_style_of_architectural_drawings__flux-dev-lora_1x1_46748.png",
     "https://xfigurabucket.s3.us-east-1.amazonaws.com/A+crazy+man+with+bla_-1.png",
     "https://xfigurabucket.s3.us-east-1.amazonaws.com/a_an_organic_villa_next_to_the_sea_at_the_base_and_a_futuristic_design_aesthetic__hyper_realistic_photograph_ideogram-v2_1x1_664320.png",
-  ];
+  ], []);
 
   // Move initial data loading to a separate effect that runs only when storage is ready
   useEffect(() => {

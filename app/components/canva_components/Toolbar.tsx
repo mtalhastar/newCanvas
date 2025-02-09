@@ -7,7 +7,6 @@ import {
   Circle as CircleIcon,
   Redo,
   RotateCcw,
-  Palette,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
