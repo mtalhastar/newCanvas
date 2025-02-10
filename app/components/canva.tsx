@@ -8,6 +8,7 @@ import React, {
   Fragment,
   useMemo,
 } from "react";
+
 import {
   Stage,
   Layer,
@@ -98,6 +99,7 @@ interface DraggableImageProps {
   y: number;
   isSelected: boolean;
   selectedIds: string[];
+  activeTool: ToolType;
   onClick: (e: KonvaEventObject<MouseEvent>) => void;
   onDragEnd: (id: string, newX: number, newY: number) => void;
   onDelete: () => void;
@@ -142,6 +144,7 @@ const DraggableImage = ({
   y,
   isSelected,
   selectedIds,
+  activeTool,
   onClick,
   onDragEnd,
 }: DraggableImageProps) => {
@@ -153,11 +156,20 @@ const DraggableImage = ({
         image={image}
         x={x}
         y={y}
-        draggable={isSelected && selectedIds.length === 1}
+        draggable={activeTool === "select"}
         onClick={onClick}
-        onDragEnd={(e: KonvaEventObject<DragEvent>) =>
-          onDragEnd(id, e.target.x(), e.target.y())
-        }
+        onDragStart={(e) => {
+          if (!isSelected) {
+            onClick(e);
+          }
+        }}
+        onDragEnd={(e: KonvaEventObject<DragEvent>) => {
+          e.evt.stopPropagation();
+          onDragEnd(id, e.target.x(), e.target.y());
+        }}
+        onDragMove={(e) => {
+          e.evt.stopPropagation();
+        }}
         perfectDrawEnabled={false}
       />
       {isSelected && (
@@ -186,6 +198,27 @@ const DraggableImage = ({
 // -----------------------------------------------------------------------------
 // Main Canvas Component
 // -----------------------------------------------------------------------------
+
+// Create a component to load and track image dimensions
+const ImageDimensionLoader = ({ 
+  url, 
+  id,
+  onLoad 
+}: { 
+  url: string;
+  id: string;
+  onLoad: (id: string, dimensions: { width: number; height: number }) => void 
+}) => {
+  const [image] = useImage(url);
+  
+  useEffect(() => {
+    if (image) {
+      onLoad(id, { width: image.width, height: image.height });
+    }
+  }, [image, id, onLoad]);
+  
+  return null;
+};
 
 const Canva = () => {
   // Konva Stage Ref
@@ -281,9 +314,23 @@ const Canva = () => {
     y: 0,
   });
 
-  // ---------------------------------------------------------------------------
-  // Compute Group Bounding Box for Selected Items
-  // ---------------------------------------------------------------------------
+  // Add state for image dimensions
+  const [imageDimensions, setImageDimensions] = useState<Map<string, { width: number; height: number }>>(new Map());
+  
+  const handleImageDimensionLoad = useCallback((id: string, dimensions: { width: number; height: number }) => {
+    setImageDimensions(prev => {
+      // Only update if dimensions have changed
+      const currentDims = prev.get(id);
+      if (currentDims?.width === dimensions.width && currentDims?.height === dimensions.height) {
+        return prev;
+      }
+      const newMap = new Map(prev);
+      newMap.set(id, dimensions);
+      return newMap;
+    });
+  }, []);
+
+  // Update the groupBBox calculation
   const groupBBox = useMemo(() => {
     if (selectedIds.length < 2) return null;
     const xs: number[] = [];
@@ -291,10 +338,11 @@ const Canva = () => {
     
     images.forEach((img) => {
       if (selectedIds.includes(img.id)) {
+        const dims = imageDimensions.get(img.id) || { width: IMAGE_WIDTH, height: IMAGE_HEIGHT };
         xs.push(img.x);
         ys.push(img.y);
-        xs.push(img.x + IMAGE_WIDTH);
-        ys.push(img.y + IMAGE_HEIGHT);
+        xs.push(img.x + dims.width);
+        ys.push(img.y + dims.height);
       }
     });
     
@@ -338,7 +386,7 @@ const Canva = () => {
       width: maxX - minX,
       height: maxY - minY
     };
-  }, [images, shapes, lines, selectedIds]);
+  }, [images, shapes, lines, selectedIds, imageDimensions]);
 
   // ---------------------------------------------------------------------------
   // Update viewport and history helper functions
@@ -428,14 +476,17 @@ const Canva = () => {
 
       if (activeTool === "select") {
         if (target === stage) {
+          e.evt.preventDefault();
+          e.evt.stopPropagation();
           if (!e.evt.shiftKey) setSelectedIds([]);
           setIsSelecting(true);
           const pos = stage.getPointerPosition();
           if (!pos) return;
-          selectionStart.current = {
+          const stagePos = {
             x: (pos.x - stage.x()) / stage.scaleX(),
             y: (pos.y - stage.y()) / stage.scaleY(),
           };
+          selectionStart.current = stagePos;
         }
         return;
       }
@@ -471,7 +522,7 @@ const Canva = () => {
         updateShapes([...shapes, newShape]);
       }
     },
-    [activeTool, lines, shapes, strokeColor, strokeWidth, updateLines, updateShapes]
+    [activeTool, lines, shapes, strokeColor, strokeWidth, updateLines, updateShapes, setSelectedIds, setIsSelecting]
   );
 
   const handleMouseMove = useCallback((e: KonvaEventObject<MouseEvent>) => {
@@ -488,15 +539,19 @@ const Canva = () => {
     }
 
     if (isSelecting && selectionStart.current) {
+      e.evt.preventDefault();
+      e.evt.stopPropagation();
       const pos = stage.getPointerPosition();
       if (!pos) return;
-      const stageX = (pos.x - stage.x()) / stage.scaleX();
-      const stageY = (pos.y - stage.y()) / stage.scaleY();
+      const stagePos = {
+        x: (pos.x - stage.x()) / stage.scaleX(),
+        y: (pos.y - stage.y()) / stage.scaleY(),
+      };
       const rect = {
-        x: Math.min(selectionStart.current.x, stageX),
-        y: Math.min(selectionStart.current.y, stageY),
-        width: Math.abs(stageX - selectionStart.current.x),
-        height: Math.abs(stageY - selectionStart.current.y),
+        x: Math.min(selectionStart.current.x, stagePos.x),
+        y: Math.min(selectionStart.current.y, stagePos.y),
+        width: Math.abs(stagePos.x - selectionStart.current.x),
+        height: Math.abs(stagePos.y - selectionStart.current.y),
       };
       setSelectionRect(rect);
       const newSelectedIds: string[] = [];
@@ -693,32 +748,36 @@ const Canva = () => {
     e.stopPropagation();
     const stage = stageRef.current;
     if (!stage) return;
-    const pos = stage.getPointerPosition();
-    if (!pos) return;
-    const stagePos = {
-      x: (pos.x - stage.x()) / stage.scaleX(),
-      y: (pos.y - stage.y()) / stage.scaleY(),
+
+    // Get the drop position relative to the stage
+    const stageBox = stage.container().getBoundingClientRect();
+    const pointerPosition = {
+      x: (e.clientX - stageBox.left - viewport.x) / viewport.scale,
+      y: (e.clientY - stageBox.top - viewport.y) / viewport.scale
     };
     
     const files = Array.from(e.dataTransfer?.files || []);
     files.forEach((file) => {
       if (file.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
-        // Convert the file to base64
         const reader = new FileReader();
         reader.onload = (readerEvent) => {
           const base64Url = readerEvent.target?.result as string;
           const newImage = {
-            id: `image-${Date.now()}`,
+            id: `image-${Date.now()}-${Math.random()}`,
             url: base64Url,
-            x: stagePos.x,
-            y: stagePos.y,
+            x: pointerPosition.x - IMAGE_WIDTH / 2, // Center the image on cursor
+            y: pointerPosition.y - IMAGE_HEIGHT / 2
           };
           updateImages([...images, newImage]);
+          addHistoryEntry({
+            ...stateRef.current,
+            images: [...images, newImage]
+          });
         };
         reader.readAsDataURL(file);
       }
     });
-  }, [images, updateImages]);
+  }, [images, viewport.scale, viewport.x, viewport.y, updateImages, addHistoryEntry, stateRef]);
 
   const handleImageDelete = useCallback(() => {
     if (selectedId) {
@@ -997,12 +1056,22 @@ const Canva = () => {
       margin: 0,
       padding: 0
     }}>
+      {/* Add ImageDimensionLoader components */}
+      {images.map((img) => (
+        <ImageDimensionLoader
+          key={img.id}
+          id={img.id}
+          url={img.url}
+          onLoad={handleImageDimensionLoad}
+        />
+      ))}
+      
       <Stage
         ref={stageRef}
         width={stageDimensions.width}
         height={stageDimensions.height}
         draggable={
-          activeTool === "hand" || (activeTool === "select" && selectedIds.length === 0 && !isSelecting)
+          activeTool === "hand" || (activeTool === "select" && !isSelecting && selectedIds.length === 0)
         }
         onWheel={handleWheel}
         x={viewport.x}
@@ -1013,19 +1082,25 @@ const Canva = () => {
         onMouseUp={handleMouseUp}
         onClick={(e) => {
           const clickedOnEmpty = e.target === e.target.getStage();
-          if (clickedOnEmpty) {
-            setSelectedId(null);
+          if (clickedOnEmpty && !isSelecting) {
+            setSelectedIds([]);
           }
         }}
         onDragMove={(e) => {
-          const stage = e.target.getStage();
-          if (stage)
-            updateViewport({ ...viewport, x: stage.x(), y: stage.y() });
+          if (activeTool === "hand" || (!isSelecting && selectedIds.length === 0)) {
+            const stage = e.target.getStage();
+            if (stage) {
+              updateViewport({ ...viewport, x: stage.x(), y: stage.y() });
+            }
+          }
         }}
         onDragEnd={(e) => {
-          const stage = e.target.getStage();
-          if (stage)
-            updateViewport({ ...viewport, x: stage.x(), y: stage.y() });
+          if (activeTool === "hand" || (!isSelecting && selectedIds.length === 0)) {
+            const stage = e.target.getStage();
+            if (stage) {
+              updateViewport({ ...viewport, x: stage.x(), y: stage.y() });
+            }
+          }
         }}
         onTouchStart={(e) => {
           if (e.evt.touches.length === 2) e.evt.preventDefault();
@@ -1079,6 +1154,7 @@ const Canva = () => {
               y={img.y}
               isSelected={selectedIds.includes(img.id)}
               selectedIds={selectedIds}
+              activeTool={activeTool}
               onClick={(e) => {
                 e.evt.stopPropagation();
                 if (e.evt.shiftKey) {
@@ -1159,16 +1235,38 @@ const Canva = () => {
                     setSelectedIds([line.id]);
                   }
                 }}
+                onDragStart={(e) => {
+                  // Store initial position for reference
+                  e.target.setAttr('lastX', e.target.x());
+                  e.target.setAttr('lastY', e.target.y());
+                }}
                 onDragMove={(e) => {
-                  const newPoints = line.points.map((point, i) => {
-                    if (i % 2 === 0) return point + e.target.x();
-                    return point + e.target.y();
-                  });
+                  const target = e.target;
+                  const lastX = target.getAttr('lastX') || 0;
+                  const lastY = target.getAttr('lastY') || 0;
+                  const newX = target.x();
+                  const newY = target.y();
+                  const dx = newX - lastX;
+                  const dy = newY - lastY;
+
+                  const newPoints = [...line.points];
+                  for (let i = 0; i < newPoints.length; i += 2) {
+                    newPoints[i] += dx;
+                    newPoints[i + 1] += dy;
+                  }
+
                   const updatedLine = { ...line, points: newPoints };
                   updateLines(lines.map(l => l.id === line.id ? updatedLine : l));
-                  e.target.position({ x: 0, y: 0 }); // Reset position after updating points
+
+                  // Update last position
+                  target.setAttr('lastX', newX);
+                  target.setAttr('lastY', newY);
                 }}
-                onDragEnd={() => {
+                onDragEnd={(e) => {
+                  // Reset position after drag
+                  e.target.position({ x: 0, y: 0 });
+                  e.target.setAttr('lastX', 0);
+                  e.target.setAttr('lastY', 0);
                   addHistoryEntry(stateRef.current);
                 }}
                 shadowEnabled={isSelected}
