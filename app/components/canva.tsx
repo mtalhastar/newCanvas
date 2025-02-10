@@ -124,6 +124,13 @@ interface Line {
 
 type ToolType = "select" | "pen" | "rectangle" | "circle" | "hand";
 
+// Add new interface for context menu
+interface ContextMenuState {
+  show: boolean;
+  x: number;
+  y: number;
+}
+
 // -----------------------------------------------------------------------------
 // DraggableImage Component
 // -----------------------------------------------------------------------------
@@ -141,13 +148,12 @@ const DraggableImage = ({
   const [image] = useImage(url);
   return (
     <>
-      {/* Explicitly set the id so that KonvaEventObject.id() returns it */}
       <KonvaImage
         id={id}
         image={image}
         x={x}
         y={y}
-        draggable={selectedIds.length <= 1}
+        draggable={isSelected && selectedIds.length === 1}
         onClick={onClick}
         onDragEnd={(e: KonvaEventObject<DragEvent>) =>
           onDragEnd(id, e.target.x(), e.target.y())
@@ -268,6 +274,13 @@ const Canva = () => {
   // Add this near the top with other hooks
   const [cursorImg] = useImage("/cursor.png");
 
+  // Add state for context menu
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>({
+    show: false,
+    x: 0,
+    y: 0,
+  });
+
   // ---------------------------------------------------------------------------
   // Compute Group Bounding Box for Selected Items
   // ---------------------------------------------------------------------------
@@ -287,20 +300,45 @@ const Canva = () => {
     
     shapes.forEach((shape) => {
       if (selectedIds.includes(shape.id)) {
-        xs.push(shape.x);
-        ys.push(shape.y);
-        xs.push(shape.x + shape.width);
-        ys.push(shape.y + shape.height);
+        if (shape.type === "rectangle") {
+          xs.push(shape.x);
+          ys.push(shape.y);
+          xs.push(shape.x + shape.width);
+          ys.push(shape.y + shape.height);
+        } else if (shape.type === "circle") {
+          const radius = Math.abs(shape.width);
+          xs.push(shape.x - radius);
+          xs.push(shape.x + radius);
+          ys.push(shape.y - radius);
+          ys.push(shape.y + radius);
+        }
+      }
+    });
+    
+    lines.forEach((line) => {
+      if (selectedIds.includes(line.id)) {
+        for (let i = 0; i < line.points.length; i += 2) {
+          xs.push(line.points[i]);
+          ys.push(line.points[i + 1]);
+        }
       }
     });
     
     if (xs.length === 0 || ys.length === 0) return null;
-    const minX = Math.min(...xs);
-    const minY = Math.min(...ys);
-    const maxX = Math.max(...xs);
-    const maxY = Math.max(...ys);
-    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-  }, [images, shapes, selectedIds]);
+    
+    const padding = 5;
+    const minX = Math.min(...xs) - padding;
+    const minY = Math.min(...ys) - padding;
+    const maxX = Math.max(...xs) + padding;
+    const maxY = Math.max(...ys) + padding;
+    
+    return {
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY
+    };
+  }, [images, shapes, lines, selectedIds]);
 
   // ---------------------------------------------------------------------------
   // Update viewport and history helper functions
@@ -335,34 +373,37 @@ const Canva = () => {
       const stage = stageRef.current;
       if (!stage) return;
 
-      if (!e.evt.ctrlKey) {
-        const deltaX = e.evt.deltaX;
-        const deltaY = e.evt.deltaY;
-        updateViewport({
-          ...viewport,
-          x: viewport.x - deltaX,
-          y: viewport.y - deltaY,
-        });
-        return;
-      }
-
       const pointer = stage.getPointerPosition();
       if (!pointer) return;
-      const oldScale = viewport.scale;
-      const scaleBy = Math.exp(-e.evt.deltaY * 0.001);
-      const newScale = Math.min(
-        MAX_SCALE,
-        Math.max(MIN_SCALE, oldScale * scaleBy)
-      );
-      const mousePointTo = {
-        x: (pointer.x - viewport.x) / oldScale,
-        y: (pointer.y - viewport.y) / oldScale,
-      };
-      updateViewport({
-        scale: newScale,
-        x: pointer.x - mousePointTo.x * newScale,
-        y: mousePointTo.y * newScale,
-      });
+
+      // Check if it's a zoom gesture (pinch or ctrl+wheel)
+      if (e.evt.ctrlKey) {
+        const oldScale = viewport.scale;
+        const scaleBy = 1 - e.evt.deltaY * 0.01;
+        const newScale = Math.min(
+          MAX_SCALE,
+          Math.max(MIN_SCALE, oldScale * scaleBy)
+        );
+
+        const mousePointTo = {
+          x: (pointer.x - viewport.x) / oldScale,
+          y: (pointer.y - viewport.y) / oldScale,
+        };
+
+        updateViewport({
+          scale: newScale,
+          x: pointer.x - mousePointTo.x * newScale,
+          y: pointer.y - mousePointTo.y * newScale,
+        });
+      } else {
+        // Handle panning (two-finger slide or regular wheel)
+        const speed = e.evt.shiftKey ? 3 : 1; // Faster pan with shift key
+        updateViewport({
+          ...viewport,
+          x: viewport.x - e.evt.deltaX * speed,
+          y: viewport.y - e.evt.deltaY * speed,
+        });
+      }
     },
     [viewport, updateViewport]
   );
@@ -598,28 +639,47 @@ const Canva = () => {
   // Group Drag Handle: When more than one item is selected, render a transparent,
   // dashed rectangle that you can drag to move all selected objects.
   // ---------------------------------------------------------------------------
-  const handleGroupDragMove = (e: KonvaEventObject<DragEvent>) => {
+  const handleGroupDragMove = useCallback((e: KonvaEventObject<DragEvent>) => {
     if (!groupBBox) return;
+    
     const newPos = e.target.position();
     const deltaX = newPos.x - groupBBox.x;
     const deltaY = newPos.y - groupBBox.y;
-    
-    const newImages = images.map((img: Storage["images"][0]) =>
+
+    // Update images
+    const newImages = images.map(img => 
       selectedIds.includes(img.id)
         ? { ...img, x: img.x + deltaX, y: img.y + deltaY }
         : img
     );
     
-    const newShapes = shapes.map((shape: Storage["shapes"][0]) =>
+    // Update shapes
+    const newShapes = shapes.map(shape => 
       selectedIds.includes(shape.id)
         ? { ...shape, x: shape.x + deltaX, y: shape.y + deltaY }
         : shape
     );
     
+    // Update lines
+    const newLines = lines.map(line => 
+      selectedIds.includes(line.id)
+        ? {
+            ...line,
+            points: line.points.map((coord, index) => 
+              index % 2 === 0 ? coord + deltaX : coord + deltaY
+            )
+          }
+        : line
+    );
+
+    // Update all at once
     updateImages(newImages);
     updateShapes(newShapes);
+    updateLines(newLines);
+
+    // Reset the group position
     e.target.position({ x: groupBBox.x, y: groupBBox.y });
-  };
+  }, [groupBBox, selectedIds, images, shapes, lines, updateImages, updateShapes, updateLines]);
 
   const handleGroupDragEnd = useCallback(() => {
     addHistoryEntry(stateRef.current);
@@ -810,6 +870,117 @@ const Canva = () => {
     }
   };
 
+  // Add clipboard handling functions
+  const handleCopy = useCallback(() => {
+    if (selectedIds.length === 0) return;
+
+    const clipboardData = {
+      images: images.filter(img => selectedIds.includes(img.id)),
+      shapes: shapes.filter(shape => selectedIds.includes(shape.id)),
+      lines: lines.filter(line => selectedIds.includes(line.id))
+    };
+
+    localStorage.setItem('canvas_clipboard', JSON.stringify(clipboardData));
+  }, [selectedIds, images, shapes, lines]);
+
+  const handlePaste = useCallback(() => {
+    const clipboardStr = localStorage.getItem('canvas_clipboard');
+    if (!clipboardStr) return;
+
+    try {
+      const clipboard = JSON.parse(clipboardStr);
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      const pointer = stage.getPointerPosition();
+      if (!pointer) return;
+
+      // Convert stage position to world coordinates
+      const worldPos = {
+        x: (pointer.x - viewport.x) / viewport.scale,
+        y: (pointer.y - viewport.y) / viewport.scale
+      };
+
+      // Calculate offset from original positions to maintain relative positioning
+      const offsetX = worldPos.x - (clipboard.images[0]?.x || clipboard.shapes[0]?.x || clipboard.lines[0]?.points[0] || 0);
+      const offsetY = worldPos.y - (clipboard.images[0]?.y || clipboard.shapes[0]?.y || clipboard.lines[0]?.points[1] || 0);
+
+      // Create new items with new IDs and positions
+      const newImages = clipboard.images.map((img: CanvasImage) => ({
+        ...img,
+        id: `image-${Date.now()}-${Math.random()}`,
+        x: img.x + offsetX,
+        y: img.y + offsetY
+      }));
+
+      const newShapes = clipboard.shapes.map((shape: Shape) => ({
+        ...shape,
+        id: `shape-${Date.now()}-${Math.random()}`,
+        x: shape.x + offsetX,
+        y: shape.y + offsetY
+      }));
+
+      const newLines = clipboard.lines.map((line: Line) => ({
+        ...line,
+        id: `line-${Date.now()}-${Math.random()}`,
+        points: line.points.map((coord: number, index: number) => 
+          index % 2 === 0 ? coord + offsetX : coord + offsetY
+        )
+      }));
+
+      // Update storage with new items
+      updateImages([...images, ...newImages]);
+      updateShapes([...shapes, ...newShapes]);
+      updateLines([...lines, ...newLines]);
+
+      // Select newly pasted items
+      const newIds = [...newImages.map((img: CanvasImage) => img.id), 
+                     ...newShapes.map((shape: Shape) => shape.id),
+                     ...newLines.map((line: Line) => line.id)];
+      setSelectedIds(newIds);
+      
+      addHistoryEntry(stateRef.current);
+    } catch (error) {
+      console.error('Failed to paste items:', error);
+    }
+  }, [viewport, images, shapes, lines, updateImages, updateShapes, updateLines, addHistoryEntry]);
+
+  // Add keyboard shortcut handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        handleCopy();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        handlePaste();
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        handleDelete();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleCopy, handlePaste, handleDelete]);
+
+  // Add context menu handler
+  const handleContextMenu = useCallback((e: KonvaEventObject<MouseEvent>) => {
+    e.evt.preventDefault();
+    if (selectedIds.length > 0) {
+      setContextMenu({
+        show: true,
+        x: e.evt.clientX,
+        y: e.evt.clientY
+      });
+    }
+  }, [selectedIds]);
+
+  // Add click handler to close context menu
+  useEffect(() => {
+    const handleClick = () => setContextMenu({ show: false, x: 0, y: 0 });
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, []);
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -862,6 +1033,7 @@ const Canva = () => {
         onTouchMove={(e) => {
           if (e.evt.touches.length === 2) e.evt.preventDefault();
         }}
+        onContextMenu={handleContextMenu}
       >
         {/* Grid Layer */}
         <Layer>
@@ -934,20 +1106,28 @@ const Canva = () => {
               perfectDrawEnabled={false}
             />
           )}
-          {/* Render group drag handle if more than one item is selected */}
+          {/* Group selection rectangle */}
           {selectedIds.length > 1 && groupBBox && (
             <Rect
               x={groupBBox.x}
               y={groupBBox.y}
               width={groupBBox.width}
               height={groupBBox.height}
-              fill="rgba(0,0,0,0)"
-              stroke="blue"
+              stroke="#0096FF"
+              strokeWidth={2}
               dash={[5, 5]}
+              fill="transparent"
               draggable
-              perfectDrawEnabled={false}
               onDragMove={handleGroupDragMove}
               onDragEnd={handleGroupDragEnd}
+              onMouseEnter={(e) => {
+                const stage = e.target.getStage();
+                if (stage) stage.container().style.cursor = 'move';
+              }}
+              onMouseLeave={(e) => {
+                const stage = e.target.getStage();
+                if (stage) stage.container().style.cursor = 'default';
+              }}
             />
           )}
         </Layer>
@@ -1159,6 +1339,53 @@ const Canva = () => {
         canUndo={canUndo}
         canRedo={canRedo}
       />
+
+      {/* Context Menu */}
+      {contextMenu.show && (
+        <div
+          style={{
+            position: 'fixed',
+            top: contextMenu.y,
+            left: contextMenu.x,
+            backgroundColor: 'white',
+            boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+            borderRadius: '4px',
+            padding: '4px 0',
+            zIndex: 1000
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleCopy();
+              setContextMenu({ show: false, x: 0, y: 0 });
+            }}
+            className="block w-full px-4 py-2 text-left hover:bg-gray-100"
+          >
+            Copy
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handlePaste();
+              setContextMenu({ show: false, x: 0, y: 0 });
+            }}
+            className="block w-full px-4 py-2 text-left hover:bg-gray-100"
+          >
+            Paste
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDelete();
+              setContextMenu({ show: false, x: 0, y: 0 });
+            }}
+            className="block w-full px-4 py-2 text-left hover:bg-gray-100"
+          >
+            Delete
+          </button>
+        </div>
+      )}
     </div>
   );
 };
