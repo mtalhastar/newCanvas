@@ -13,11 +13,12 @@ export interface ViewportState {
 
 export interface Shape {
   id: string;
-  type: "rectangle" | "circle";
+  type: "rectangle" | "circle" | "line" | "arrow" | "star" | "triangle";
   x: number;
   y: number;
   width: number;
   height: number;
+  points?: number[];  // For line, arrow, and star
   color: string;
   strokeWidth: number;
 }

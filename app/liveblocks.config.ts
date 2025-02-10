@@ -15,11 +15,12 @@ type Storage = {
   }>;
   shapes: Array<{
     id: string;
-    type: "rectangle" | "circle";
+    type: "rectangle" | "circle" | "line" | "arrow" | "star" | "triangle";
     x: number;
     y: number;
     width: number;
     height: number;
+    points?: number[];
     color: string;
     strokeWidth: number;
   }>;

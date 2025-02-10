@@ -38,6 +38,7 @@ import LoadingSpinner from "./ui/LoadingSpinner";
 import { default as CanvasControlsComponent } from "./canva_components/CanvasControls";
 import Toolbar  from "./canva_components/Toolbar";
 
+import { ToolType, ShapeType } from "@/app/types/canvas";
 
 // -----------------------------------------------------------------------------
 // Utility Functions
@@ -107,11 +108,12 @@ interface DraggableImageProps {
 
 interface Shape {
   id: string;
-  type: "rectangle" | "circle";
+  type: ShapeType;
   x: number;
   y: number;
   width: number;
   height: number;
+  points?: number[];
   color: string;
   strokeWidth: number;
 }
@@ -123,8 +125,6 @@ interface Line {
   color: string;
   width: number;
 }
-
-type ToolType = "select" | "pen" | "rectangle" | "circle" | "hand";
 
 // Add new interface for context menu
 interface ContextMenuState {
@@ -218,6 +218,54 @@ const ImageDimensionLoader = ({
   }, [image, id, onLoad]);
   
   return null;
+};
+
+// Add these helper functions at the top of the file
+const calculateArrowPoints = (from: { x: number; y: number }, to: { x: number; y: number }) => {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const angle = Math.atan2(dy, dx);
+  const headlen = 20;
+
+  return [
+    from.x, from.y,
+    to.x, to.y,
+    to.x - headlen * Math.cos(angle - Math.PI / 6),
+    to.y - headlen * Math.sin(angle - Math.PI / 6),
+    to.x, to.y,
+    to.x - headlen * Math.cos(angle + Math.PI / 6),
+    to.y - headlen * Math.sin(angle + Math.PI / 6),
+  ];
+};
+
+const calculateStarPoints = (centerX: number, centerY: number, size: number) => {
+  const points: number[] = [];
+  const outerRadius = size;
+  const innerRadius = size / 2;
+  const numPoints = 5;
+
+  for (let i = 0; i < numPoints * 2; i++) {
+    const radius = i % 2 === 0 ? outerRadius : innerRadius;
+    const angle = (i * Math.PI) / numPoints - Math.PI / 2;
+    points.push(
+      centerX + radius * Math.cos(angle),
+      centerY + radius * Math.sin(angle)
+    );
+  }
+  return points;
+};
+
+const calculateTrianglePoints = (x: number, y: number, width: number, height: number) => {
+  return [
+    x + width / 2, y,
+    x + width, y + height,
+    x, y + height
+  ];
+};
+
+// Add after imports
+const isShapeTool = (tool: ToolType): tool is ShapeType => {
+  return ["rectangle", "circle", "line", "arrow", "star", "triangle"].includes(tool as string);
 };
 
 const Canva = () => {
@@ -508,8 +556,8 @@ const Canva = () => {
           width: strokeWidth,
         };
         updateLines([...lines, newLine]);
-      } else if (activeTool === "rectangle" || activeTool === "circle") {
-        const newShape = {
+      } else if (isShapeTool(activeTool)) {
+        const newShape: Shape = {
           id: `shape-${Date.now()}`,
           type: activeTool,
           x: stagePos.x,
@@ -518,11 +566,14 @@ const Canva = () => {
           height: 0,
           color: strokeColor,
           strokeWidth,
+          points: activeTool === "line" || activeTool === "arrow" 
+            ? [stagePos.x, stagePos.y, stagePos.x, stagePos.y]
+            : undefined
         };
         updateShapes([...shapes, newShape]);
       }
     },
-    [activeTool, lines, shapes, strokeColor, strokeWidth, updateLines, updateShapes, setSelectedIds, setIsSelecting]
+    [activeTool, lines, shapes, strokeColor, strokeWidth, updateLines, updateShapes]
   );
 
   const handleMouseMove = useCallback((e: KonvaEventObject<MouseEvent>) => {
@@ -572,25 +623,42 @@ const Canva = () => {
 
       // Check for shapes
       shapes.forEach((shape) => {
+        let isIntersecting = false;
+        
         if (shape.type === "rectangle") {
-          if (
+          isIntersecting = (
             rect.x < shape.x + shape.width &&
             rect.x + rect.width > shape.x &&
             rect.y < shape.y + shape.height &&
             rect.y + rect.height > shape.y
-          ) {
-            newSelectedIds.push(shape.id);
-          }
-        } else {
-          const radius = Math.abs(shape.width);
-          if (
+          );
+        } else if (shape.type === "circle") {
+          const radius = Math.abs(shape.width / 2);
+          isIntersecting = (
             rect.x < shape.x + radius &&
             rect.x + rect.width > shape.x - radius &&
             rect.y < shape.y + radius &&
             rect.y + rect.height > shape.y - radius
-          ) {
-            newSelectedIds.push(shape.id);
+          );
+        } else if (shape.type === "triangle" && shape.points) {
+          // Check if any point of the triangle is inside the selection rectangle
+          for (let i = 0; i < shape.points.length; i += 2) {
+            const pointX = shape.points[i];
+            const pointY = shape.points[i + 1];
+            if (
+              pointX >= rect.x &&
+              pointX <= rect.x + rect.width &&
+              pointY >= rect.y &&
+              pointY <= rect.y + rect.height
+            ) {
+              isIntersecting = true;
+              break;
+            }
           }
+        }
+        
+        if (isIntersecting) {
+          newSelectedIds.push(shape.id);
         }
       });
 
@@ -622,12 +690,15 @@ const Canva = () => {
     }
 
     if (isDrawing.current) {
+      const stage = e.target.getStage();
+      if (!stage) return;
       const pos = stage.getPointerPosition();
       if (!pos) return;
       const stagePos = {
         x: (pos.x - stage.x()) / stage.scaleX(),
         y: (pos.y - stage.y()) / stage.scaleY(),
       };
+
       if (activeTool === "pen") {
         const lastLine = lines[lines.length - 1];
         const updatedLine = {
@@ -636,13 +707,75 @@ const Canva = () => {
           points: lastLine.points.concat([stagePos.x, stagePos.y]),
         };
         updateLines([...lines.slice(0, -1), updatedLine]);
-      } else if (activeTool === "rectangle" || activeTool === "circle") {
+      } else if (isShapeTool(activeTool)) {
         const lastShape = shapes[shapes.length - 1];
-        const updatedShape = {
-          ...lastShape,
-          width: stagePos.x - lastShape.x,
-          height: stagePos.y - lastShape.y,
-        };
+        if (!lastShape) return;
+
+        let updatedShape: Shape;
+
+        switch (lastShape.type) {
+          case "circle":
+            const dx = stagePos.x - lastShape.x;
+            const dy = stagePos.y - lastShape.y;
+            const radius = Math.sqrt(dx * dx + dy * dy);
+            updatedShape = {
+              ...lastShape,
+              width: radius * 2,
+              height: radius * 2
+            };
+            break;
+          case "line":
+            updatedShape = {
+              ...lastShape,
+              width: stagePos.x - lastShape.x,
+              height: stagePos.y - lastShape.y,
+              points: [lastShape.x, lastShape.y, stagePos.x, stagePos.y]
+            };
+            break;
+          case "arrow":
+            updatedShape = {
+              ...lastShape,
+              width: stagePos.x - lastShape.x,
+              height: stagePos.y - lastShape.y,
+              points: calculateArrowPoints(
+                { x: lastShape.x, y: lastShape.y },
+                { x: stagePos.x, y: stagePos.y }
+              )
+            };
+            break;
+          case "star":
+            const size = Math.max(
+              Math.abs(stagePos.x - lastShape.x),
+              Math.abs(stagePos.y - lastShape.y)
+            );
+            updatedShape = {
+              ...lastShape,
+              width: size * 2,
+              height: size * 2,
+              points: calculateStarPoints(lastShape.x, lastShape.y, size)
+            };
+            break;
+          case "triangle":
+            updatedShape = {
+              ...lastShape,
+              width: stagePos.x - lastShape.x,
+              height: stagePos.y - lastShape.y,
+              points: calculateTrianglePoints(
+                lastShape.x,
+                lastShape.y,
+                stagePos.x - lastShape.x,
+                stagePos.y - lastShape.y
+              )
+            };
+            break;
+          default:
+            updatedShape = {
+              ...lastShape,
+              width: stagePos.x - lastShape.x,
+              height: stagePos.y - lastShape.y
+            };
+        }
+
         updateShapes([...shapes.slice(0, -1), updatedShape]);
       }
     }
@@ -1278,98 +1411,134 @@ const Canva = () => {
           })}
           {shapes.map((shape) => {
             const isSelected = selectedIds.includes(shape.id);
-            if (shape.type === "rectangle") {
-              return (
-                <Fragment key={shape.id}>
-                  <Rect
-                    x={shape.x}
-                    y={shape.y}
-                    width={shape.width}
-                    height={shape.height}
-                    stroke={shape.color}
-                    strokeWidth={shape.strokeWidth}
-                    draggable={selectedIds.length <= 1}
-                    onClick={(e) => {
-                      e.evt.stopPropagation();
-                      if (e.evt.shiftKey) {
-                        setSelectedIds((prev) =>
-                          prev.includes(shape.id)
-                            ? prev.filter((id) => id !== shape.id)
-                            : [...prev, shape.id]
-                        );
-                      } else {
-                        setSelectedIds([shape.id]);
-                      }
-                    }}
-                    onDragMove={(e) => {
-                      const updatedShape = { ...shape, x: e.target.x(), y: e.target.y() };
-                      updateShapes(shapes.map(s => s.id === shape.id ? updatedShape : s));
-                    }}
-                    onDragEnd={() => {
-                      addHistoryEntry(stateRef.current);
-                    }}
-                    perfectDrawEnabled={false}
-                  />
-                  {isSelected && (
+            const commonProps = {
+              onClick: (e: KonvaEventObject<MouseEvent>) => {
+                e.evt.stopPropagation();
+                if (e.evt.shiftKey) {
+                  setSelectedIds((prev) =>
+                    prev.includes(shape.id)
+                      ? prev.filter((id) => id !== shape.id)
+                      : [...prev, shape.id]
+                  );
+                } else {
+                  setSelectedIds([shape.id]);
+                }
+              },
+              stroke: shape.color,
+              strokeWidth: shape.strokeWidth,
+              draggable: selectedIds.length <= 1,
+              onDragMove: (e: KonvaEventObject<DragEvent>) => {
+                const updatedShape = { ...shape, x: e.target.x(), y: e.target.y() };
+                updateShapes(shapes.map(s => s.id === shape.id ? updatedShape : s));
+              },
+              onDragEnd: () => {
+                addHistoryEntry(stateRef.current);
+              },
+              perfectDrawEnabled: false,
+            };
+
+            switch (shape.type) {
+              case "rectangle":
+                return (
+                  <Fragment key={shape.id}>
                     <Rect
-                      key={`${shape.id}-overlay`}
-                      x={shape.x - 2}
-                      y={shape.y - 2}
-                      width={shape.width + 4}
-                      height={shape.height + 4}
-                      stroke="#0096FF"
-                      strokeWidth={2}
-                      dash={[5, 5]}
-                      perfectDrawEnabled={false}
+                      key={`${shape.id}-shape`}
+                      {...commonProps}
+                      x={shape.x}
+                      y={shape.y}
+                      width={shape.width}
+                      height={shape.height}
+                      fill="transparent"
                     />
-                  )}
-                </Fragment>
-              );
+                    {isSelected && (
+                      <Rect
+                        key={`${shape.id}-selection`}
+                        x={shape.x - 2}
+                        y={shape.y - 2}
+                        width={shape.width + 4}
+                        height={shape.height + 4}
+                        stroke="#0096FF"
+                        strokeWidth={2}
+                        dash={[5, 5]}
+                        perfectDrawEnabled={false}
+                      />
+                    )}
+                  </Fragment>
+                );
+              case "circle":
+                return (
+                  <Fragment key={shape.id}>
+                    <Circle
+                      key={`${shape.id}-shape`}
+                      {...commonProps}
+                      x={shape.x}
+                      y={shape.y}
+                      radius={Math.abs(shape.width / 2)}
+                      fill="transparent"
+                    />
+                    {isSelected && (
+                      <Circle
+                        key={`${shape.id}-selection`}
+                        x={shape.x}
+                        y={shape.y}
+                        radius={Math.abs(shape.width / 2) + 2}
+                        stroke="#0096FF"
+                        strokeWidth={2}
+                        dash={[5, 5]}
+                        perfectDrawEnabled={false}
+                      />
+                    )}
+                  </Fragment>
+                );
+              case "line":
+              case "arrow":
+              case "star":
+                return (
+                  <Fragment key={shape.id}>
+                    <Line
+                      key={`${shape.id}-shape`}
+                      {...commonProps}
+                      points={shape.points || []}
+                      fill="transparent"
+                    />
+                    {isSelected && (
+                      <Line
+                        key={`${shape.id}-selection`}
+                        points={shape.points || []}
+                        stroke="#0096FF"
+                        strokeWidth={shape.strokeWidth + 4}
+                        dash={[5, 5]}
+                        perfectDrawEnabled={false}
+                      />
+                    )}
+                  </Fragment>
+                );
+              case "triangle":
+                return (
+                  <Fragment key={shape.id}>
+                    <Line
+                      key={`${shape.id}-shape`}
+                      {...commonProps}
+                      points={shape.points || []}
+                      closed={true}
+                      fill="transparent"
+                    />
+                    {isSelected && (
+                      <Line
+                        key={`${shape.id}-selection`}
+                        points={shape.points || []}
+                        closed={true}
+                        stroke="#0096FF"
+                        strokeWidth={2}
+                        dash={[5, 5]}
+                        perfectDrawEnabled={false}
+                      />
+                    )}
+                  </Fragment>
+                );
+              default:
+                return null;
             }
-            return (
-              <Fragment key={shape.id}>
-                <Circle
-                  x={shape.x}
-                  y={shape.y}
-                  radius={Math.abs(shape.width)}
-                  stroke={shape.color}
-                  strokeWidth={shape.strokeWidth}
-                  draggable={selectedIds.length <= 1}
-                  onClick={(e) => {
-                    e.evt.stopPropagation();
-                    if (e.evt.shiftKey) {
-                      setSelectedIds((prev) =>
-                        prev.includes(shape.id)
-                          ? prev.filter((id) => id !== shape.id)
-                          : [...prev, shape.id]
-                      );
-                    } else {
-                      setSelectedIds([shape.id]);
-                    }
-                  }}
-                  onDragMove={(e) => {
-                    const updatedShape = { ...shape, x: e.target.x(), y: e.target.y() };
-                    updateShapes(shapes.map(s => s.id === shape.id ? updatedShape : s));
-                  }}
-                  onDragEnd={() => {
-                    addHistoryEntry(stateRef.current);
-                  }}
-                  perfectDrawEnabled={false}
-                />
-                {isSelected && (
-                  <Circle
-                    key={`${shape.id}-overlay`}
-                    x={shape.x}
-                    y={shape.y}
-                    radius={Math.abs(shape.width) + 2}
-                    stroke="#0096FF"
-                    strokeWidth={2}
-                    dash={[5, 5]}
-                    perfectDrawEnabled={false}
-                  />
-                )}
-              </Fragment>
-            );
           })}
         </Layer>
         <Layer>
