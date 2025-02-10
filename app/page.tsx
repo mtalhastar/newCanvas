@@ -6,7 +6,7 @@ export default function Home() {
   return (
     <RoomProvider 
       id="my-canvas-room" 
-      initialPresence={{ cursor: null }}
+      initialPresence={{ cursor: null, lastUpdate: Date.now() }}
       initialStorage={{
         images: [],
         shapes: [],

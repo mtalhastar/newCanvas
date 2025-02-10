@@ -1,7 +1,6 @@
-import { createClient, JsonObject } from "@liveblocks/client";
+import { createClient } from "@liveblocks/client";
 import { createRoomContext } from "@liveblocks/react";
 
-// @ts-ignore
 type Presence = {
   cursor: { x: number; y: number } | null;
   lastUpdate: number;

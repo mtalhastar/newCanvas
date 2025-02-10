@@ -99,7 +99,6 @@ interface DraggableImageProps {
   x: number;
   y: number;
   isSelected: boolean;
-  selectedIds: string[];
   activeTool: ToolType;
   onClick: (e: KonvaEventObject<MouseEvent>) => void;
   onDragEnd: (id: string, newX: number, newY: number) => void;
@@ -143,7 +142,6 @@ const DraggableImage = ({
   x,
   y,
   isSelected,
-  selectedIds,
   activeTool,
   onClick,
   onDragEnd,
@@ -241,15 +239,22 @@ const calculateArrowPoints = (from: { x: number; y: number }, to: { x: number; y
 const calculateStarPoints = (centerX: number, centerY: number, size: number) => {
   const points: number[] = [];
   const outerRadius = size;
-  const innerRadius = size / 2;
+  const innerRadius = size * 0.4;  // Make inner radius 40% of outer radius
   const numPoints = 5;
+  const angleStep = (Math.PI * 2) / numPoints;
+  const halfAngleStep = angleStep / 2;
 
-  for (let i = 0; i < numPoints * 2; i++) {
-    const radius = i % 2 === 0 ? outerRadius : innerRadius;
-    const angle = (i * Math.PI) / numPoints - Math.PI / 2;
+  for (let i = 0; i < numPoints; i++) {
+    const angle = i * angleStep - Math.PI / 2;
+    // Outer point
     points.push(
-      centerX + radius * Math.cos(angle),
-      centerY + radius * Math.sin(angle)
+      centerX + outerRadius * Math.cos(angle),
+      centerY + outerRadius * Math.sin(angle)
+    );
+    // Inner point
+    points.push(
+      centerX + innerRadius * Math.cos(angle + halfAngleStep),
+      centerY + innerRadius * Math.sin(angle + halfAngleStep)
     );
   }
   return points;
@@ -297,7 +302,7 @@ const Canva = () => {
   // Drawing Tools State
   const [activeTool, setActiveTool] = useState<ToolType>("select");
   const [strokeColor, setStrokeColor] = useState("#000000");
-  const [strokeWidth, setStrokeWidth] = useState(2);
+  const [strokeWidth] = useState(2);
   const isDrawing = useRef(false);
 
   // History State for Undo/Redo
@@ -323,7 +328,6 @@ const Canva = () => {
   const { shapes, images, lines } = memoizedStorage;
   
   // Create mutations for updating storage
-  // @ts-ignore
   const updateShapes = useMutation((
     { storage }: MutationContext<Presence, Storage, BaseUserMeta>,
     newShapes: Storage["shapes"]
@@ -331,7 +335,6 @@ const Canva = () => {
     storage.set("shapes", newShapes);
   }, []);
 
-  // @ts-ignore
   const updateImages = useMutation((
     { storage }: MutationContext<Presence, Storage, BaseUserMeta>,
     newImages: Storage["images"]
@@ -339,7 +342,6 @@ const Canva = () => {
     storage.set("images", newImages);
   }, []);
 
-  // @ts-ignore
   const updateLines = useMutation((
     { storage }: MutationContext<Presence, Storage, BaseUserMeta>,
     newLines: Storage["lines"]
@@ -519,15 +521,13 @@ const Canva = () => {
 
       const target = e.target;
       const className = target.getClassName();
-      if (
-        className === "Line" ||
-        className === "Rect" ||
-        className === "Image"
-      ) {
-        return;
-      }
 
+      // Allow selection when clicking on shapes
       if (activeTool === "select") {
+        if (className === "Line" || className === "Rect" || className === "Circle" || className === "Image") {
+          return; // Let the shape's onClick handler handle selection
+        }
+
         if (target === stage) {
           e.evt.preventDefault();
           e.evt.stopPropagation();
@@ -591,7 +591,6 @@ const Canva = () => {
         x: (pos.x - stage.x()) / stage.scaleX(),
         y: (pos.y - stage.y()) / stage.scaleY(),
       };
-      // @ts-ignore
       updateMyPresence({ 
         cursor: stagePos,
         lastUpdate: Date.now()
@@ -649,19 +648,21 @@ const Canva = () => {
             rect.y < shape.y + radius &&
             rect.y + rect.height > shape.y - radius
           );
-        } else if (shape.type === "triangle" && shape.points) {
-          // Check if any point of the triangle is inside the selection rectangle
-          for (let i = 0; i < shape.points.length; i += 2) {
-            const pointX = shape.points[i];
-            const pointY = shape.points[i + 1];
-            if (
-              pointX >= rect.x &&
-              pointX <= rect.x + rect.width &&
-              pointY >= rect.y &&
-              pointY <= rect.y + rect.height
-            ) {
-              isIntersecting = true;
-              break;
+        } else if (shape.type === "star" || shape.type === "arrow" || shape.type === "line" || shape.type === "triangle") {
+          // Check if any point of the shape is inside the selection rectangle
+          if (shape.points) {
+            for (let i = 0; i < shape.points.length; i += 2) {
+              const pointX = shape.points[i];
+              const pointY = shape.points[i + 1];
+              if (
+                pointX >= rect.x &&
+                pointX <= rect.x + rect.width &&
+                pointY >= rect.y &&
+                pointY <= rect.y + rect.height
+              ) {
+                isIntersecting = true;
+                break;
+              }
             }
           }
         }
@@ -851,11 +852,22 @@ const Canva = () => {
     );
     
     // Update shapes
-    const newShapes = shapes.map(shape => 
-      selectedIds.includes(shape.id)
-        ? { ...shape, x: shape.x + deltaX, y: shape.y + deltaY }
-        : shape
-    );
+    const newShapes = shapes.map(shape => {
+      if (!selectedIds.includes(shape.id)) return shape;
+      
+      if (shape.type === "star" || shape.type === "arrow" || shape.type === "line" || shape.type === "triangle") {
+        // For shapes with points, update all points
+        return {
+          ...shape,
+          points: shape.points?.map((coord, index) => 
+            index % 2 === 0 ? coord + deltaX : coord + deltaY
+          )
+        };
+      } else {
+        // For regular shapes, just update x and y
+        return { ...shape, x: shape.x + deltaX, y: shape.y + deltaY };
+      }
+    });
     
     // Update lines
     const newLines = lines.map(line => 
@@ -1325,7 +1337,6 @@ const Canva = () => {
               x={img.x}
               y={img.y}
               isSelected={selectedIds.includes(img.id)}
-              selectedIds={selectedIds}
               activeTool={activeTool}
               onClick={(e) => {
                 e.evt.stopPropagation();
@@ -1538,7 +1549,28 @@ const Canva = () => {
                       key={`${shape.id}-shape`}
                       {...commonProps}
                       points={shape.points || []}
-                      fill="transparent"
+                      fill={shape.type === "star" ? "transparent" : undefined}
+                      closed={shape.type === "star"}
+                      draggable={selectedIds.length <= 1}
+                      onClick={(e) => {
+                        e.evt.stopPropagation();
+                        if (e.evt.shiftKey) {
+                          setSelectedIds((prev) =>
+                            prev.includes(shape.id)
+                              ? prev.filter((id) => id !== shape.id)
+                              : [...prev, shape.id]
+                          );
+                        } else {
+                          setSelectedIds([shape.id]);
+                        }
+                      }}
+                      onDragMove={(e) => {
+                        const updatedShape = { ...shape, x: e.target.x(), y: e.target.y() };
+                        updateShapes(shapes.map(s => s.id === shape.id ? updatedShape : s));
+                      }}
+                      onDragEnd={() => {
+                        addHistoryEntry(stateRef.current);
+                      }}
                     />
                     {isSelected && (
                       <Line
@@ -1548,6 +1580,7 @@ const Canva = () => {
                         strokeWidth={shape.strokeWidth + 4}
                         dash={[5, 5]}
                         perfectDrawEnabled={false}
+                        closed={shape.type === "star"}
                       />
                     )}
                   </Fragment>
@@ -1636,8 +1669,6 @@ const Canva = () => {
         setActiveTool={setActiveTool}
         strokeColor={strokeColor}
         setStrokeColor={setStrokeColor}
-        strokeWidth={strokeWidth}
-        setStrokeWidth={setStrokeWidth}
         onUndo={handleUndo}
         onRedo={handleRedo}
         canUndo={canUndo}
