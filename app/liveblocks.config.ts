@@ -1,9 +1,10 @@
 import { createClient, JsonObject } from "@liveblocks/client";
 import { createRoomContext } from "@liveblocks/react";
 
+// @ts-ignore
 type Presence = {
   cursor: { x: number; y: number } | null;
-  [key: string]: JsonObject | null;
+  lastUpdate: number;
 };
 
 type Storage = {

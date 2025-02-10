@@ -268,6 +268,8 @@ const isShapeTool = (tool: ToolType): tool is ShapeType => {
   return ["rectangle", "circle", "line", "arrow", "star", "triangle"].includes(tool as string);
 };
 
+const CURSOR_TIMEOUT = 1000 * 5; // 5 seconds timeout
+
 const Canva = () => {
   // Konva Stage Ref
   const stageRef = useRef<Konva.Stage>(null);
@@ -321,6 +323,7 @@ const Canva = () => {
   const { shapes, images, lines } = memoizedStorage;
   
   // Create mutations for updating storage
+  // @ts-ignore
   const updateShapes = useMutation((
     { storage }: MutationContext<Presence, Storage, BaseUserMeta>,
     newShapes: Storage["shapes"]
@@ -328,6 +331,7 @@ const Canva = () => {
     storage.set("shapes", newShapes);
   }, []);
 
+  // @ts-ignore
   const updateImages = useMutation((
     { storage }: MutationContext<Presence, Storage, BaseUserMeta>,
     newImages: Storage["images"]
@@ -335,6 +339,7 @@ const Canva = () => {
     storage.set("images", newImages);
   }, []);
 
+  // @ts-ignore
   const updateLines = useMutation((
     { storage }: MutationContext<Presence, Storage, BaseUserMeta>,
     newLines: Storage["lines"]
@@ -586,7 +591,11 @@ const Canva = () => {
         x: (pos.x - stage.x()) / stage.scaleX(),
         y: (pos.y - stage.y()) / stage.scaleY(),
       };
-      updateMyPresence({ cursor: stagePos });
+      // @ts-ignore
+      updateMyPresence({ 
+        cursor: stagePos,
+        lastUpdate: Date.now()
+      });
     }
 
     if (isSelecting && selectionStart.current) {
@@ -1173,6 +1182,36 @@ const Canva = () => {
     return () => window.removeEventListener('click', handleClick);
   }, []);
 
+  // Add this effect after other useEffect hooks
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        updateMyPresence({ cursor: null, lastUpdate: Date.now() });
+      }
+    };
+    const handleBeforeUnload = () => {
+      updateMyPresence({ cursor: null, lastUpdate: Date.now() });
+    };
+    
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      updateMyPresence({ cursor: null, lastUpdate: Date.now() });
+    };
+  }, [updateMyPresence]);
+
+  const othersWithTimestamp = useMemo(() => {
+    return others.filter((user) => {
+      if (!user.presence?.cursor) return false;
+      const lastUpdate = user.presence?.lastUpdate || Date.now();
+      const now = Date.now();
+      return (now - lastUpdate) < CURSOR_TIMEOUT;
+    });
+  }, [others]);
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -1543,17 +1582,15 @@ const Canva = () => {
         </Layer>
         <Layer>
           {/* Render other users' cursors */}
-          {others.map((other) => {
-            const otherCursor = other.presence?.cursor;
-            if (!otherCursor) return null;
-
-            // Use the cursorImg from the hook above
+          {othersWithTimestamp.map(({ connectionId, presence }) => {
+            if (presence?.cursor == null) return null;
+            
             if (!cursorImg) {
               return (
                 <Circle
-                  key={`cursor-${other.connectionId}`}
-                  x={otherCursor.x}
-                  y={otherCursor.y}
+                  key={`cursor-${connectionId}`}
+                  x={presence.cursor.x}
+                  y={presence.cursor.y}
                   radius={5}
                   fill="blue"
                 />
@@ -1562,10 +1599,10 @@ const Canva = () => {
 
             return (
               <KonvaImage
-                key={`cursor-${other.connectionId}`}
+                key={`cursor-${connectionId}`}
                 image={cursorImg}
-                x={otherCursor.x - 10}
-                y={otherCursor.y - 10}
+                x={presence.cursor.x - 10}
+                y={presence.cursor.y - 10}
                 width={50}
                 height={50}
               />

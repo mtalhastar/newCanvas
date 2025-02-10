@@ -107,10 +107,10 @@ const Toolbar: React.FC<ToolbarProps> = ({
   const activeButtonStyle = "[&>*]:text-[#2100FF] bg-white/30 shadow-inner";
 
   return (
-    <div className="fixed right-5 top-1/2 -translate-y-1/2 flex gap-3 items-center">
+    <div className="fixed right-5 top-1/2 -translate-y-1/2 flex gap-3">
       {/* Shapes panel - shown when a shape tool is active */}
       {showShapesPanel && (
-        <div className={`${glassStyle} rounded-2xl py-4 px-3 flex flex-col gap-3 relative self-center`}>
+        <div className={`${glassStyle} rounded-2xl py-4 px-3 flex flex-col gap-3 relative`}>
           <button
             onClick={() => handleShapeClick("line")}
             className={`w-6 h-6 flex items-center justify-center rounded-lg ${buttonStyle} ${
@@ -193,7 +193,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
       )}
 
       {/* Main toolbar */}
-      <div className={`${glassStyle} rounded-2xl p-3 flex flex-col gap-4 relative self-center`}>
+      <div className={`${glassStyle} rounded-2xl p-3 flex flex-col gap-4 relative`}>
         <div className="flex flex-col gap-5 items-center relative z-10 py-2">
           <button
             onClick={() => {
