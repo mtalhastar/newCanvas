@@ -65,8 +65,9 @@ function throttle<T extends unknown[]>(func: (...args: T) => void, limit: number
 const GRID_SIZE = 50;
 const INITIAL_SCALE = 1;
 const INITIAL_DIMENSIONS = { width: 1000, height: 800 };
-const MIN_SCALE = 0.1;
-const MAX_SCALE = 5;
+const MIN_SCALE = 0.50; // Minimum zoom out (25% of original size)
+const MAX_SCALE = 3;    // Maximum zoom in (300% of original size)
+const ZOOM_SPEED = 0.06; // Controls how fast zooming occurs
 
 const IMAGE_GAP = 1000;
 const GRID_COLUMNS = 3;
@@ -412,22 +413,25 @@ const Canva = () => {
       // Check if it's a zoom gesture (pinch or ctrl+wheel)
       if (e.evt.ctrlKey) {
         const oldScale = viewport.scale;
-        const scaleBy = 1 - e.evt.deltaY * 0.01;
+        const scaleBy = 1 - e.evt.deltaY * ZOOM_SPEED * 0.5; // Slower zoom for wheel
         const newScale = Math.min(
           MAX_SCALE,
           Math.max(MIN_SCALE, oldScale * scaleBy)
         );
 
-        const mousePointTo = {
-          x: (pointer.x - viewport.x) / oldScale,
-          y: (pointer.y - viewport.y) / oldScale,
-        };
+        // Only update if the scale actually changed
+        if (newScale !== oldScale) {
+          const mousePointTo = {
+            x: (pointer.x - viewport.x) / oldScale,
+            y: (pointer.y - viewport.y) / oldScale,
+          };
 
-        updateViewport({
-          scale: newScale,
-          x: pointer.x - mousePointTo.x * newScale,
-          y: pointer.y - mousePointTo.y * newScale,
-        });
+          updateViewport({
+            scale: newScale,
+            x: pointer.x - mousePointTo.x * newScale,
+            y: pointer.y - mousePointTo.y * newScale,
+          });
+        }
       } else {
         // Handle panning (two-finger slide or regular wheel)
         const speed = e.evt.shiftKey ? 3 : 1; // Faster pan with shift key
@@ -1628,14 +1632,16 @@ const Canva = () => {
 
       <CanvasControlsComponent
         onZoomIn={() => {
-          const newScale = Math.min(viewport.scale * 1.06, MAX_SCALE);
-          updateViewport({ ...viewport, scale: newScale });
+          const newScale = Math.min(viewport.scale * (1 + ZOOM_SPEED), MAX_SCALE);
+          if (newScale !== viewport.scale) {
+            updateViewport({ ...viewport, scale: newScale });
+          }
         }}
         onZoomOut={() => {
-          updateViewport({
-            ...viewport,
-            scale: Math.max(viewport.scale / 1.06, MIN_SCALE),
-          });
+          const newScale = Math.max(viewport.scale * (1 - ZOOM_SPEED), MIN_SCALE);
+          if (newScale !== viewport.scale) {
+            updateViewport({ ...viewport, scale: newScale });
+          }
         }}
         onPan={(dx, dy) => {
           updateViewport({
