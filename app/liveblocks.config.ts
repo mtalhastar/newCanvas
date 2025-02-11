@@ -12,6 +12,8 @@ type Storage = {
     url: string;
     x: number;
     y: number;
+    width?: number;
+    height?: number;
   }>;
   shapes: Array<{
     id: string;

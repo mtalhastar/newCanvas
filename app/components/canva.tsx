@@ -39,6 +39,7 @@ import { default as CanvasControlsComponent } from "./canva_components/CanvasCon
 import Toolbar  from "./canva_components/Toolbar";
 
 import { ToolType, ShapeType } from "@/app/types/canvas";
+import { uploadToS3 } from "../utils/s3-upload";
 
 // -----------------------------------------------------------------------------
 // Utility Functions
@@ -91,6 +92,8 @@ interface CanvasImage {
   url: string;
   x: number;
   y: number;
+  width?: number;
+  height?: number;
 }
 
 interface DraggableImageProps {
@@ -98,10 +101,13 @@ interface DraggableImageProps {
   url: string;
   x: number;
   y: number;
+  width?: number;
+  height?: number;
   isSelected: boolean;
   activeTool: ToolType;
   onClick: (e: KonvaEventObject<MouseEvent>) => void;
   onDragEnd: (id: string, newX: number, newY: number) => void;
+  onResize: (id: string, newWidth: number, newHeight: number, newX: number, newY: number) => void;
   onDelete: () => void;
 }
 
@@ -141,10 +147,14 @@ const DraggableImage = ({
   url,
   x,
   y,
+  width,
+  height,
   isSelected,
   activeTool,
   onClick,
   onDragEnd,
+  onResize,
+  onDelete,
 }: DraggableImageProps) => {
   const [image] = useImage(url);
   return (
@@ -154,6 +164,8 @@ const DraggableImage = ({
         image={image}
         x={x}
         y={y}
+        width={width}
+        height={height}
         draggable={activeTool === "select"}
         onClick={onClick}
         onDragStart={(e) => {
@@ -789,7 +801,8 @@ const Canva = () => {
         updateShapes([...shapes.slice(0, -1), updatedShape]);
       }
     }
-  }, [
+  },
+    [
     activeTool,
     isSelecting,
     lines,
@@ -897,7 +910,7 @@ const Canva = () => {
   // ---------------------------------------------------------------------------
   // File Drop & Resize Handlers
   // ---------------------------------------------------------------------------
-  const handleDrop = useCallback((e: DragEvent) => {
+  const handleDrop = useCallback(async (e: DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const stage = stageRef.current;
@@ -910,27 +923,65 @@ const Canva = () => {
       y: (e.clientY - stageBox.top - viewport.y) / viewport.scale
     };
     
+    // Handle files dropped from file system
     const files = Array.from(e.dataTransfer?.files || []);
-    files.forEach((file) => {
-      if (file.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
-        const reader = new FileReader();
-        reader.onload = (readerEvent) => {
-          const base64Url = readerEvent.target?.result as string;
-          const newImage = {
-            id: `image-${Date.now()}-${Math.random()}`,
-            url: base64Url,
-            x: pointerPosition.x - IMAGE_WIDTH / 2, // Center the image on cursor
-            y: pointerPosition.y - IMAGE_HEIGHT / 2
-          };
-          updateImages([...images, newImage]);
-          addHistoryEntry({
-            ...stateRef.current,
-            images: [...images, newImage]
-          });
-        };
-        reader.readAsDataURL(file);
+    if (files.length > 0) {
+      try {
+        await Promise.all(files.map(async (file) => {
+          if (file.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
+            try {
+              // Upload to S3 and get the public URL
+              const publicUrl = await uploadToS3(file);
+              
+              const newImage = {
+                id: `image-${Date.now()}-${Math.random()}`,
+                url: publicUrl,
+                x: pointerPosition.x - IMAGE_WIDTH / 2,
+                y: pointerPosition.y - IMAGE_HEIGHT / 2
+              };
+              
+              updateImages([...images, newImage]);
+              addHistoryEntry({
+                ...stateRef.current,
+                images: [...images, newImage]
+              });
+            } catch (error) {
+              console.error('Failed to upload image:', error);
+            }
+          }
+        }));
+      } catch (error) {
+        console.error('Error handling file drop:', error);
       }
-    });
+      return;
+    }
+
+    // Handle images dragged from other websites
+    const items = Array.from(e.dataTransfer?.items || []);
+    try {
+      await Promise.all(items.map(async (item) => {
+        if (item.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
+          const imageUrl = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
+          if (imageUrl && imageUrl.match(/^https?:\/\/.+/)) {
+            // For network images, use the original URL directly
+            const newImage = {
+              id: `image-${Date.now()}-${Math.random()}`,
+              url: imageUrl,
+              x: pointerPosition.x - IMAGE_WIDTH / 2,
+              y: pointerPosition.y - IMAGE_HEIGHT / 2
+            };
+            
+            updateImages([...images, newImage]);
+            addHistoryEntry({
+              ...stateRef.current,
+              images: [...images, newImage]
+            });
+          }
+        }
+      }));
+    } catch (error) {
+      console.error('Error handling network image drop:', error);
+    }
   }, [images, viewport.scale, viewport.x, viewport.y, updateImages, addHistoryEntry, stateRef]);
 
   const handleImageDelete = useCallback(() => {
@@ -964,6 +1015,25 @@ const Canva = () => {
     },
     [images, updateImages]
   );
+
+  const handleImageResize = useCallback((
+    id: string,
+    newWidth: number,
+    newHeight: number,
+    newX: number,
+    newY: number
+  ) => {
+    const newImages = images.map((img) =>
+      img.id === id
+        ? { ...img, width: newWidth, height: newHeight, x: newX, y: newY }
+        : img
+    );
+    updateImages(newImages);
+    addHistoryEntry({
+      ...stateRef.current,
+      images: newImages
+    });
+  }, [images, updateImages, addHistoryEntry, stateRef]);
 
   useEffect(() => {
     const container = stageRef.current?.container();
@@ -1336,6 +1406,8 @@ const Canva = () => {
               url={img.url}
               x={img.x}
               y={img.y}
+              width={img.width}
+              height={img.height}
               isSelected={selectedIds.includes(img.id)}
               activeTool={activeTool}
               onClick={(e) => {
@@ -1351,6 +1423,7 @@ const Canva = () => {
                 }
               }}
               onDragEnd={handleImageDragEnd}
+              onResize={handleImageResize}
               onDelete={() => handleImageDelete()}
             />
           ))}
