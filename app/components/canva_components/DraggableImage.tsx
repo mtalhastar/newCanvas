@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Image as KonvaImage, Rect, Transformer, Group } from 'react-konva';
+import { Image as KonvaImage, Transformer, Group } from 'react-konva';
 import { KonvaEventObject } from 'konva/lib/Node';
 import useImage from 'use-image';
+import type Konva from 'konva';
 
-interface DraggableImageProps {
+export interface DraggableImageProps {
   id: string;
   url: string;
   x: number;
@@ -14,8 +15,7 @@ interface DraggableImageProps {
   activeTool: string;
   onClick: (e: KonvaEventObject<MouseEvent>) => void;
   onDragEnd: (id: string, newX: number, newY: number) => void;
-  onResize: (id: string, newWidth: number, newHeight: number, newX: number, newY: number) => void;
-  onDelete: () => void;
+  onResize: (id: string, width: number, height: number, x: number, y: number) => void;
 }
 
 const DraggableImage: React.FC<DraggableImageProps> = ({
@@ -32,8 +32,9 @@ const DraggableImage: React.FC<DraggableImageProps> = ({
   onResize,
 }) => {
   const [image] = useImage(url);
-  const imageRef = React.useRef<any>(null);
-  const transformerRef = React.useRef<any>(null);
+  const imageRef = React.useRef<Konva.Image>(null);
+  const transformerRef = React.useRef<Konva.Transformer>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [dimensions, setDimensions] = useState({
     width: initialWidth || 0,
     height: initialHeight || 0,
@@ -59,7 +60,7 @@ const DraggableImage: React.FC<DraggableImageProps> = ({
     }
   }, [isSelected]);
 
-  const handleTransformEnd = (e: KonvaEventObject<Event>) => {
+  const handleTransformEnd = () => {
     const node = imageRef.current;
     if (!node) return;
 
@@ -78,7 +79,26 @@ const DraggableImage: React.FC<DraggableImageProps> = ({
       height: newHeight,
     });
 
+    // Call onResize with the new dimensions and position
     onResize(id, newWidth, newHeight, node.x(), node.y());
+  };
+
+  const handleDragStart = (e: KonvaEventObject<DragEvent>) => {
+    setIsDragging(true);
+    e.target.moveToTop();
+  };
+
+  const handleDragEnd = (e: KonvaEventObject<DragEvent>) => {
+    setIsDragging(false);
+    onDragEnd(id, e.target.x(), e.target.y());
+  };
+
+  const handleClick = (e: KonvaEventObject<MouseEvent>) => {
+    // Only trigger click if we weren't dragging
+    if (!isDragging) {
+      onClick(e);
+    }
+    setIsDragging(false);
   };
 
   return (
@@ -93,13 +113,9 @@ const DraggableImage: React.FC<DraggableImageProps> = ({
           width={dimensions.width}
           height={dimensions.height}
           draggable={activeTool === "select"}
-          onClick={onClick}
-          onDragStart={(e) => {
-            e.target.moveToTop();
-          }}
-          onDragEnd={(e) => {
-            onDragEnd(id, e.target.x(), e.target.y());
-          }}
+          onClick={handleClick}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
           onTransformEnd={handleTransformEnd}
           perfectDrawEnabled={false}
         />
@@ -111,8 +127,8 @@ const DraggableImage: React.FC<DraggableImageProps> = ({
             // Limit resize
             const minWidth = 5;
             const minHeight = 5;
-            const maxWidth = 1000;
-            const maxHeight = 1000;
+            const maxWidth = 2000;
+            const maxHeight = 2000;
             
             if (
               newBox.width < minWidth ||
@@ -125,10 +141,20 @@ const DraggableImage: React.FC<DraggableImageProps> = ({
             return newBox;
           }}
           enabledAnchors={[
-            'top-left', 'top-right',
-            'bottom-left', 'bottom-right'
+            'top-left', 'top-center', 'top-right',
+            'middle-left', 'middle-right',
+            'bottom-left', 'bottom-center', 'bottom-right'
           ]}
           rotateEnabled={false}
+          padding={5}
+          anchorSize={10}
+          anchorCornerRadius={5}
+          borderStroke="#0096FF"
+          anchorStroke="#0096FF"
+          anchorFill="#fff"
+          borderStrokeWidth={2}
+          anchorStrokeWidth={2}
+          keepRatio={false}
         />
       )}
     </>

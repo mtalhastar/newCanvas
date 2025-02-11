@@ -37,6 +37,7 @@ import { BaseUserMeta } from "@liveblocks/client";
 import LoadingSpinner from "./ui/LoadingSpinner";
 import { default as CanvasControlsComponent } from "./canva_components/CanvasControls";
 import Toolbar  from "./canva_components/Toolbar";
+import DraggableImage from "./canva_components/DraggableImage";
 
 import { ToolType, ShapeType } from "@/app/types/canvas";
 import { uploadToS3 } from "../utils/s3-upload";
@@ -96,21 +97,6 @@ interface CanvasImage {
   height?: number;
 }
 
-interface DraggableImageProps {
-  id: string;
-  url: string;
-  x: number;
-  y: number;
-  width?: number;
-  height?: number;
-  isSelected: boolean;
-  activeTool: ToolType;
-  onClick: (e: KonvaEventObject<MouseEvent>) => void;
-  onDragEnd: (id: string, newX: number, newY: number) => void;
-  onResize: (id: string, newWidth: number, newHeight: number, newX: number, newY: number) => void;
-  onDelete: () => void;
-}
-
 interface Shape {
   id: string;
   type: ShapeType;
@@ -137,73 +123,6 @@ interface ContextMenuState {
   x: number;
   y: number;
 }
-
-// -----------------------------------------------------------------------------
-// DraggableImage Component
-// -----------------------------------------------------------------------------
-
-const DraggableImage = ({
-  id,
-  url,
-  x,
-  y,
-  width,
-  height,
-  isSelected,
-  activeTool,
-  onClick,
-  onDragEnd,
-  onResize,
-  onDelete,
-}: DraggableImageProps) => {
-  const [image] = useImage(url);
-  return (
-    <>
-      <KonvaImage
-        id={id}
-        image={image}
-        x={x}
-        y={y}
-        width={width}
-        height={height}
-        draggable={activeTool === "select"}
-        onClick={onClick}
-        onDragStart={(e) => {
-          if (!isSelected) {
-            onClick(e);
-          }
-        }}
-        onDragEnd={(e: KonvaEventObject<DragEvent>) => {
-          e.evt.stopPropagation();
-          onDragEnd(id, e.target.x(), e.target.y());
-        }}
-        onDragMove={(e) => {
-          e.evt.stopPropagation();
-        }}
-        perfectDrawEnabled={false}
-      />
-      {isSelected && (
-        <Rect
-          x={x - 2}
-          y={y - 2}
-          width={(image?.width || 0) + 4}
-          height={(image?.height || 0) + 4}
-          stroke="#0096FF"
-          strokeWidth={2}
-          dash={[5, 5]}
-          perfectDrawEnabled={false}
-        />
-      )}
-    </>
-  );
-};
-
-
-
-// -----------------------------------------------------------------------------
-// Toolbar Component
-// -----------------------------------------------------------------------------
-
 
 // -----------------------------------------------------------------------------
 // Main Canvas Component
@@ -300,7 +219,6 @@ const Canva = () => {
   const [stageDimensions, setStageDimensions] = useState(INITIAL_DIMENSIONS);
 
   // Selection State
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectionRect, setSelectionRect] = useState<{
     x: number;
@@ -984,14 +902,6 @@ const Canva = () => {
     }
   }, [images, viewport.scale, viewport.x, viewport.y, updateImages, addHistoryEntry, stateRef]);
 
-  const handleImageDelete = useCallback(() => {
-    if (selectedId) {
-      const newImages = images.filter((img) => img.id !== selectedId);
-      updateImages(newImages);
-      setSelectedId(null);
-    }
-  }, [selectedId, images, updateImages]);
-
   const handleDelete = useCallback(() => {
     if (selectedIds.length > 0) {
       const newImages = images.filter((img) => !selectedIds.includes(img.id));
@@ -1424,7 +1334,6 @@ const Canva = () => {
               }}
               onDragEnd={handleImageDragEnd}
               onResize={handleImageResize}
-              onDelete={() => handleImageDelete()}
             />
           ))}
           {selectionRect && (
@@ -1748,7 +1657,6 @@ const Canva = () => {
         canRedo={canRedo}
       />
 
-      {/* Context Menu */}
       {contextMenu.show && (
         <div
           style={{
