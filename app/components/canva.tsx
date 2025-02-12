@@ -40,7 +40,7 @@ import Toolbar  from "./canva_components/Toolbar";
 import DraggableImage from "./canva_components/DraggableImage";
 
 import { ToolType, ShapeType } from "@/app/types/canvas";
-import { uploadToS3 } from "../utils/s3-upload";
+import { uploadToS3, createRoomBackup, checkRoomBackupExists, loadRoomBackup } from "../utils/s3-upload";
 
 // -----------------------------------------------------------------------------
 // Utility Functions
@@ -125,6 +125,10 @@ interface ContextMenuState {
   y: number;
 }
 
+interface CanvasProps {
+  roomId: string;
+}
+
 // -----------------------------------------------------------------------------
 // Main Canvas Component
 // -----------------------------------------------------------------------------
@@ -207,7 +211,7 @@ const isShapeTool = (tool: ToolType): tool is ShapeType => {
 
 const CURSOR_TIMEOUT = 1000 * 5; // 5 seconds timeout
 
-const Canva = () => {
+const Canva: React.FC<CanvasProps> = ({ roomId }) => {
   // Konva Stage Ref
   const stageRef = useRef<Konva.Stage>(null);
 
@@ -885,24 +889,39 @@ const Canva = () => {
         if (item.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
           const imageUrl = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
           if (imageUrl && imageUrl.match(/^https?:\/\/.+/)) {
-            // For network images, use the original URL directly
-            const newImage = {
-              id: `image-${Date.now()}-${Math.random()}`,
-              url: imageUrl,
-              x: pointerPosition.x - IMAGE_WIDTH / 2,
-              y: pointerPosition.y - IMAGE_HEIGHT / 2
-            };
-            
-            updateImages([...images, newImage]);
-            addHistoryEntry({
-              ...stateRef.current,
-              images: [...images, newImage]
-            });
+            try {
+              // Fetch the image and check its size
+              const response = await fetch(imageUrl);
+              const blob = await response.blob();
+              
+              if (blob.size > 5 * 1024 * 1024) { // 5MB in bytes
+                alert('Image size exceeds 5MB limit. Please choose a smaller image.');
+                return;
+              }
+
+              // For network images, use the original URL directly
+              const newImage = {
+                id: `image-${Date.now()}-${Math.random()}`,
+                url: imageUrl,
+                x: pointerPosition.x - IMAGE_WIDTH / 2,
+                y: pointerPosition.y - IMAGE_HEIGHT / 2
+              };
+              
+              updateImages([...images, newImage]);
+              addHistoryEntry({
+                ...stateRef.current,
+                images: [...images, newImage]
+              });
+            } catch (error) {
+              console.error('Error processing network image:', error);
+              alert('Failed to load image. Please try again with a different image.');
+            }
           }
         }
       }));
     } catch (error) {
       console.error('Error handling network image drop:', error);
+      alert('Failed to process the dropped image. Please try again.');
     }
   }, [images, viewport.scale, viewport.x, viewport.y, updateImages, addHistoryEntry, stateRef]);
 
@@ -1011,25 +1030,39 @@ const Canva = () => {
       const isNewRoom = !storage.images && !storage.shapes && !storage.lines;
       
       if (isNewRoom) {
-        // Only initialize with default images if it's a new room
-        const initialImages = imageUrls.map((url, index) => ({
-          id: `image-${index}`,
-          url,
-          x: (index % GRID_COLUMNS) * (IMAGE_WIDTH + IMAGE_GAP) + IMAGE_GAP,
-          y: Math.floor(index / GRID_COLUMNS) * (IMAGE_HEIGHT + IMAGE_GAP) + IMAGE_GAP,
-        }));
-        
         try {
-          await Promise.all([
-            updateImages(initialImages),
-            updateShapes([]),
-            updateLines([])
-          ]);
-          console.log('Initialized new room with default state');
+          // Try to load from backup first
+          const backupData = await loadRoomBackup(roomId);
+          
+          if (backupData) {
+            // If backup exists, use it
+            console.log('Loading room data from backup');
+            await Promise.all([
+              updateImages(backupData.images || []),
+              updateShapes(backupData.shapes || []),
+              updateLines(backupData.lines || [])
+            ]);
+          } else {
+            // If no backup, initialize with default images
+            console.log('Initializing new room with default state');
+            const initialImages = imageUrls.map((url, index) => ({
+              id: `image-${index}`,
+              url,
+              x: (index % GRID_COLUMNS) * (IMAGE_WIDTH + IMAGE_GAP) + IMAGE_GAP,
+              y: Math.floor(index / GRID_COLUMNS) * (IMAGE_HEIGHT + IMAGE_GAP) + IMAGE_GAP,
+            }));
+            
+            await Promise.all([
+              updateImages(initialImages),
+              updateShapes([]),
+              updateLines([])
+            ]);
+          }
         } catch (error) {
           console.error('Failed to initialize storage:', error);
         }
       } else {
+        // Room exists in Liveblocks, use existing data
         if (!storage.images) updateImages([]);
         if (!storage.shapes) updateShapes([]);
         if (!storage.lines) updateLines([]);
@@ -1038,7 +1071,7 @@ const Canva = () => {
     };
 
     initializeStorage();
-  }, [storage, isStorageLoading, updateImages, updateShapes, updateLines, imageUrls]);
+  }, [storage, isStorageLoading, updateImages, updateShapes, updateLines, imageUrls, roomId]);
 
   const canUndo = currentIndex > 0;
   const canRedo = currentIndex < history.length - 1;
@@ -1207,6 +1240,32 @@ const Canva = () => {
       return (now - lastUpdate) < CURSOR_TIMEOUT;
     });
   }, [others]);
+
+  // Add backup check effect
+  useEffect(() => {
+    const checkAndCreateBackup = async () => {
+      try {
+        // Check if backup exists
+        const hasBackup = await checkRoomBackupExists(roomId);
+        if (!hasBackup) {
+          // Create a backup after 20 days (20 * 24 * 60 * 60 * 1000 = 1728000000 ms)
+          setTimeout(async () => {
+            const backupState = {
+              images,
+              shapes,
+              lines,
+              createdAt: new Date().toISOString(),
+            };
+            await createRoomBackup(roomId, backupState);
+          }, 1728000000);
+        }
+      } catch (error) {
+        console.error('Error handling room backup:', error);
+      }
+    };
+
+    checkAndCreateBackup();
+  }, [roomId, images, shapes, lines]);
 
   // ---------------------------------------------------------------------------
   // Render
