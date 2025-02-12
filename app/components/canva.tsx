@@ -887,7 +887,21 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
     try {
       await Promise.all(items.map(async (item) => {
         if (item.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
-          const imageUrl = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
+          let imageUrl = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
+          
+          // Handle xfigura.ai URLs by extracting the original S3 URL
+          if (imageUrl && imageUrl.includes('xfigura.ai/_next/image')) {
+            try {
+              const url = new URL(imageUrl);
+              const originalUrl = decodeURIComponent(url.searchParams.get('url') || '');
+              if (originalUrl) {
+                imageUrl = originalUrl;
+              }
+            } catch (error) {
+              console.error('Error parsing xfigura URL:', error);
+            }
+          }
+
           if (imageUrl && imageUrl.match(/^https?:\/\/.+/)) {
             try {
               // Fetch the image and check its size
