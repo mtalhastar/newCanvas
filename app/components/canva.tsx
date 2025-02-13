@@ -942,7 +942,7 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
       }
 
       // If no HTML content, try other data types
-      let imageUrl = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
+      const imageUrl = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
       
       if (!imageUrl) {
         throw new Error('No image URL found in dropped content');
