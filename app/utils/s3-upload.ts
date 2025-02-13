@@ -40,7 +40,14 @@ const s3 = new S3({
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB in bytes
 
-export async function uploadToS3(file: File): Promise<string> {
+export async function uploadToS3(file: File | { arrayBuffer: () => Promise<ArrayBuffer>; type: string; size: number; name: string }): Promise<string> {
+  if (!process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID || 
+      !process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY || 
+      !process.env.NEXT_PUBLIC_AWS_REGION || 
+      !process.env.NEXT_PUBLIC_AWS_BUCKET_NAME) {
+    throw new Error('AWS credentials are not properly configured');
+  }
+
   try {
     // Convert File to Buffer
     const arrayBuffer = await file.arrayBuffer();
@@ -51,10 +58,14 @@ export async function uploadToS3(file: File): Promise<string> {
       const image = sharp(buffer);
       const metadata = await image.metadata();
       
+      if (!metadata.width || !metadata.height) {
+        throw new Error('Invalid image file');
+      }
+      
       // Calculate scale factor to reduce file size while maintaining aspect ratio
       const scaleFactor = Math.sqrt(MAX_FILE_SIZE / file.size);
-      const newWidth = Math.round((metadata.width || 1000) * scaleFactor);
-      const newHeight = Math.round((metadata.height || 1000) * scaleFactor);
+      const newWidth = Math.round(metadata.width * scaleFactor);
+      const newHeight = Math.round(metadata.height * scaleFactor);
 
       // Process image with sharp, maintaining quality
       buffer = await image
@@ -70,7 +81,7 @@ export async function uploadToS3(file: File): Promise<string> {
     const filename = `${Date.now()}-${uuidv4()}.${fileExtension}`;
 
     const params = {
-      Bucket: process.env.NEXT_PUBLIC_AWS_BUCKET_NAME!,
+      Bucket: process.env.NEXT_PUBLIC_AWS_BUCKET_NAME,
       Key: filename,
       Body: buffer,
       ContentType: file.type,
@@ -81,7 +92,10 @@ export async function uploadToS3(file: File): Promise<string> {
     return data.Location;
   } catch (error) {
     console.error('Error uploading to S3:', error);
-    throw error;
+    if (error instanceof Error) {
+      throw new Error(`Failed to upload image: ${error.message}`);
+    }
+    throw new Error('Failed to upload image');
   }
 }
 

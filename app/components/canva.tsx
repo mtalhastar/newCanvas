@@ -849,93 +849,97 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
       y: (e.clientY - stageBox.top - viewport.y) / viewport.scale
     };
     
-    // Handle files dropped from file system
-    const files = Array.from(e.dataTransfer?.files || []);
-    if (files.length > 0) {
-      try {
-        await Promise.all(files.map(async (file) => {
-          if (file.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
-            try {
-              // Upload to S3 and get the public URL
-              const publicUrl = await uploadToS3(file);
-              
-              const newImage = {
-                id: `image-${Date.now()}-${Math.random()}`,
-                url: publicUrl,
-                x: pointerPosition.x - IMAGE_WIDTH / 2,
-                y: pointerPosition.y - IMAGE_HEIGHT / 2
-              };
-              
-              updateImages([...images, newImage]);
-              addHistoryEntry({
-                ...stateRef.current,
-                images: [...images, newImage]
-              });
-            } catch (error) {
-              console.error('Failed to upload image:', error);
-            }
-          }
-        }));
-      } catch (error) {
-        console.error('Error handling file drop:', error);
-      }
-      return;
-    }
-
-    // Handle images dragged from other websites
-    const items = Array.from(e.dataTransfer?.items || []);
     try {
-      await Promise.all(items.map(async (item) => {
-        if (item.type.match(/^image\/(jpeg|png|gif|bmp|svg\+xml)$/)) {
-          let imageUrl = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
-          
-          // Handle xfigura.ai URLs by extracting the original S3 URL
-          if (imageUrl && imageUrl.includes('xfigura.ai/_next/image')) {
-            try {
-              const url = new URL(imageUrl);
-              const originalUrl = decodeURIComponent(url.searchParams.get('url') || '');
-              if (originalUrl) {
-                imageUrl = originalUrl;
-              }
-            } catch (error) {
-              console.error('Error parsing xfigura URL:', error);
-            }
-          }
-
-          if (imageUrl && imageUrl.match(/^https?:\/\/.+/)) {
-            try {
-              // Fetch the image and check its size
-              const response = await fetch(imageUrl);
-              const blob = await response.blob();
-              
-              if (blob.size > 5 * 1024 * 1024) { // 5MB in bytes
-                alert('Image size exceeds 5MB limit. Please choose a smaller image.');
-                return;
-              }
-
-              // For network images, use the original URL directly
-              const newImage = {
-                id: `image-${Date.now()}-${Math.random()}`,
-                url: imageUrl,
-                x: pointerPosition.x - IMAGE_WIDTH / 2,
-                y: pointerPosition.y - IMAGE_HEIGHT / 2
-              };
-              
-              updateImages([...images, newImage]);
-              addHistoryEntry({
-                ...stateRef.current,
-                images: [...images, newImage]
-              });
-            } catch (error) {
-              console.error('Error processing network image:', error);
-              alert('Failed to load image. Please try again with a different image.');
-            }
-          }
+      // First check if files were dropped
+      const files = Array.from(e.dataTransfer?.files || []);
+      if (files.length > 0) {
+        // Handle local file upload
+        const file = files[0];
+        if (!file.type.startsWith('image/')) {
+          throw new Error('Only image files are supported');
         }
-      }));
+        
+        // Show loading state
+        const loadingId = `loading-${Date.now()}`;
+        const loadingImage = {
+          id: loadingId,
+          url: '', // placeholder
+          x: pointerPosition.x - IMAGE_WIDTH / 2,
+          y: pointerPosition.y - IMAGE_HEIGHT / 2
+        };
+        updateImages([...images, loadingImage]);
+        
+        try {
+          // Upload the file to S3
+          const imageUrl = await uploadToS3(file);
+          
+          // Replace loading image with actual image
+          const newImage = {
+            ...loadingImage,
+            url: imageUrl
+          };
+          
+          updateImages(images.map(img => 
+            img.id === loadingId ? newImage : img
+          ));
+          
+          addHistoryEntry({
+            ...stateRef.current,
+            images: images.map(img => 
+              img.id === loadingId ? newImage : img
+            )
+          });
+          return;
+        } catch (uploadError) {
+          // Remove loading image if upload fails
+          updateImages(images.filter(img => img.id !== loadingId));
+          throw uploadError;
+        }
+      }
+
+      // If no files, try to get URL from text/uri-list or text/plain
+      let imageUrl = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
+      
+      // If no URL found, try to get from HTML content
+      if (!imageUrl) {
+        const html = e.dataTransfer?.getData('text/html') || '';
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const img = doc.querySelector('img');
+        imageUrl = img?.src || '';
+      }
+
+      if (!imageUrl) {
+        throw new Error('No image URL or file found in dropped content');
+      }
+
+      // If it's a Next.js optimized image URL from xfigura.ai, get the original URL
+      if (imageUrl.includes('xfigura.ai/_next/image')) {
+        const url = new URL(imageUrl);
+        const originalUrl = decodeURIComponent(url.searchParams.get('url') || '');
+        if (originalUrl) {
+          imageUrl = originalUrl;
+        }
+      }
+
+      // Create and add the new image
+      const newImage = {
+        id: `image-${Date.now()}-${Math.random()}`,
+        url: imageUrl,
+        x: pointerPosition.x - IMAGE_WIDTH / 2,
+        y: pointerPosition.y - IMAGE_HEIGHT / 2
+      };
+      
+      updateImages([...images, newImage]);
+      addHistoryEntry({
+        ...stateRef.current,
+        images: [...images, newImage]
+      });
+      
     } catch (error) {
-      console.error('Error handling network image drop:', error);
-      alert('Failed to process the dropped image. Please try again.');
+      const err = error as Error;
+      console.error('Error handling image drop:', err);
+      alert(`Error adding image: ${err.message}`);
     }
   }, [images, viewport.scale, viewport.x, viewport.y, updateImages, addHistoryEntry, stateRef]);
 
@@ -1073,7 +1077,8 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
             ]);
           }
         } catch (error) {
-          console.error('Failed to initialize storage:', error);
+          const err = error as Error;
+          console.error('Failed to initialize storage:', err);
         }
       } else {
         // Room exists in Liveblocks, use existing data
@@ -1185,7 +1190,8 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
       
       addHistoryEntry(stateRef.current);
     } catch (error) {
-      console.error('Failed to paste items:', error);
+      const err = error as Error;
+      console.error('Failed to paste items:', err);
     }
   }, [viewport, images, shapes, lines, updateImages, updateShapes, updateLines, addHistoryEntry]);
 
@@ -1274,7 +1280,8 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
           }, 1728000000);
         }
       } catch (error) {
-        console.error('Error handling room backup:', error);
+        const err = error as Error;
+        console.error('Error handling room backup:', err);
       }
     };
 
