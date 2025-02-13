@@ -945,23 +945,36 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
       const imageUrl = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
       
       if (!imageUrl) {
-        throw new Error('No image URL found in dropped content');
+        console.error('No image URL found in dropped content');
+        return;
       }
 
-      // Create and add the new image
-      const newImage = {
-        id: `image-${Date.now()}-${Math.random()}`,
-        url: imageUrl,
-        x: pointerPosition.x - IMAGE_WIDTH / 2,
-        y: pointerPosition.y - IMAGE_HEIGHT / 2
-      };
-      
-      updateImages([...images, newImage]);
-      addHistoryEntry({
-        ...stateRef.current,
-        images: [...images, newImage]
-      });
-      
+      try {
+        // Validate URL
+        const url = new URL(imageUrl);
+        if (!url.protocol.startsWith('http')) {
+          throw new Error('Invalid image URL protocol');
+        }
+
+        // Create and add the new image
+        const newImage = {
+          id: `image-${Date.now()}-${Math.random()}`,
+          url: imageUrl,
+          x: pointerPosition.x - IMAGE_WIDTH / 2,
+          y: pointerPosition.y - IMAGE_HEIGHT / 2
+        };
+        
+        updateImages([...images, newImage]);
+        addHistoryEntry({
+          ...stateRef.current,
+          images: [...images, newImage]
+        });
+
+      } catch (error) {
+        console.error('Error processing dropped image:', error);
+        alert(`Error adding image: ${error instanceof Error ? error.message : 'Invalid image URL'}`);
+      }
+
     } catch (error) {
       const err = error as Error;
       console.error('Error handling image drop:', err);
