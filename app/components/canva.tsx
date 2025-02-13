@@ -859,6 +859,17 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
           throw new Error('Only image files are supported');
         }
         
+        // Create a plain object with the necessary file data
+        const fileData = {
+          arrayBuffer: async () => {
+            const buffer = await file.arrayBuffer();
+            return buffer;
+          },
+          type: file.type,
+          size: file.size,
+          name: file.name
+        };
+        
         // Show loading state
         const loadingId = `loading-${Date.now()}`;
         const loadingImage = {
@@ -871,7 +882,7 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
         
         try {
           // Upload the file to S3
-          const imageUrl = await uploadToS3(file);
+          const imageUrl = await uploadToS3(fileData);
           
           // Replace loading image with actual image
           const newImage = {
@@ -897,29 +908,44 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
         }
       }
 
-      // If no files, try to get URL from text/uri-list or text/plain
-      let imageUrl = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
-      
-      // If no URL found, try to get from HTML content
-      if (!imageUrl) {
-        const html = e.dataTransfer?.getData('text/html') || '';
+      // Try to get image URL from HTML content first
+      const html = e.dataTransfer?.getData('text/html');
+      if (html) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
         const img = doc.querySelector('img');
-        imageUrl = img?.src || '';
-      }
-
-      if (!imageUrl) {
-        throw new Error('No image URL or file found in dropped content');
-      }
-
-      // If it's a Next.js optimized image URL from xfigura.ai, get the original URL
-      if (imageUrl.includes('xfigura.ai/_next/image')) {
-        const url = new URL(imageUrl);
-        const originalUrl = decodeURIComponent(url.searchParams.get('url') || '');
-        if (originalUrl) {
-          imageUrl = originalUrl;
+        
+        // First try to get the data-image-link attribute
+        let imageUrl = img?.getAttribute('data-image-link');
+        
+        // If no data-image-link, try src
+        if (!imageUrl) {
+          imageUrl = img?.src;
         }
+        
+        if (imageUrl) {
+          // Create and add the new image
+          const newImage = {
+            id: `image-${Date.now()}-${Math.random()}`,
+            url: imageUrl,
+            x: pointerPosition.x - IMAGE_WIDTH / 2,
+            y: pointerPosition.y - IMAGE_HEIGHT / 2
+          };
+          
+          updateImages([...images, newImage]);
+          addHistoryEntry({
+            ...stateRef.current,
+            images: [...images, newImage]
+          });
+          return;
+        }
+      }
+
+      // If no HTML content, try other data types
+      let imageUrl = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
+      
+      if (!imageUrl) {
+        throw new Error('No image URL found in dropped content');
       }
 
       // Create and add the new image
@@ -1077,8 +1103,7 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
             ]);
           }
         } catch (error) {
-          const err = error as Error;
-          console.error('Failed to initialize storage:', err);
+          console.error('Failed to initialize storage:', error);
         }
       } else {
         // Room exists in Liveblocks, use existing data
@@ -1190,8 +1215,7 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
       
       addHistoryEntry(stateRef.current);
     } catch (error) {
-      const err = error as Error;
-      console.error('Failed to paste items:', err);
+      console.error('Failed to paste items:', error);
     }
   }, [viewport, images, shapes, lines, updateImages, updateShapes, updateLines, addHistoryEntry]);
 
@@ -1280,8 +1304,7 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
           }, 1728000000);
         }
       } catch (error) {
-        const err = error as Error;
-        console.error('Error handling room backup:', err);
+        console.error('Error handling room backup:', error);
       }
     };
 
