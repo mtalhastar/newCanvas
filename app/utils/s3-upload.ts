@@ -40,7 +40,38 @@ const s3 = new S3({
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB in bytes
 
-export async function uploadToS3(file: File | { arrayBuffer: () => Promise<ArrayBuffer>; type: string; size: number; name: string }): Promise<string> {
+// Client-side upload handler
+export async function handleClientUpload(file: File | { arrayBuffer: () => Promise<ArrayBuffer>; type: string; size: number; name: string }): Promise<string> {
+  try {
+    // Convert file to FormData
+    const formData = new FormData();
+    const buffer = await file.arrayBuffer();
+    const blob = new Blob([buffer], { type: file.type });
+    formData.append('file', blob, file.name);
+
+    // Make a POST request to our server action endpoint
+    const response = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error);
+    }
+
+    const data = await response.json();
+    return data.url;
+  } catch (error) {
+    console.error('Error uploading to S3:', error);
+    throw error;
+  }
+}
+
+// Server-side upload function
+export async function uploadToS3(formData: FormData): Promise<string> {
+  'use server'
+  
   if (!process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID || 
       !process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY || 
       !process.env.NEXT_PUBLIC_AWS_REGION || 
@@ -49,9 +80,12 @@ export async function uploadToS3(file: File | { arrayBuffer: () => Promise<Array
   }
 
   try {
-    // Convert File to Buffer
-    const arrayBuffer = await file.arrayBuffer();
-    let buffer = Buffer.from(arrayBuffer);
+    const file = formData.get('file') as File;
+    if (!file) {
+      throw new Error('No file provided');
+    }
+
+    let buffer = Buffer.from(await file.arrayBuffer());
     
     // Only process if file size exceeds 5MB
     if (file.size > MAX_FILE_SIZE) {
@@ -62,12 +96,10 @@ export async function uploadToS3(file: File | { arrayBuffer: () => Promise<Array
         throw new Error('Invalid image file');
       }
       
-      // Calculate scale factor to reduce file size while maintaining aspect ratio
       const scaleFactor = Math.sqrt(MAX_FILE_SIZE / file.size);
       const newWidth = Math.round(metadata.width * scaleFactor);
       const newHeight = Math.round(metadata.height * scaleFactor);
 
-      // Process image with sharp, maintaining quality
       buffer = await image
         .resize(newWidth, newHeight, {
           fit: 'inside',

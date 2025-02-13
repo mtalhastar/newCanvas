@@ -40,7 +40,7 @@ import Toolbar  from "./canva_components/Toolbar";
 import DraggableImage from "./canva_components/DraggableImage";
 
 import { ToolType, ShapeType } from "@/app/types/canvas";
-import { uploadToS3, createRoomBackup, checkRoomBackupExists, loadRoomBackup } from "../utils/s3-upload";
+import { handleClientUpload, createRoomBackup, checkRoomBackupExists, loadRoomBackup } from "../utils/s3-upload";
 
 // -----------------------------------------------------------------------------
 // Utility Functions
@@ -882,7 +882,7 @@ const Canva: React.FC<CanvasProps> = ({ roomId }) => {
         
         try {
           // Upload the file to S3
-          const imageUrl = await uploadToS3(fileData);
+          const imageUrl = await handleClientUpload(fileData);
           
           // Replace loading image with actual image
           const newImage = {
